@@ -11,6 +11,12 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
 import torch
 
+from functions import SUBM_INDICES
+
+from warnings import simplefilter
+# ignore all future warnings
+simplefilter(action='ignore', category=FutureWarning)
+
 
 def collator(items, item_size):
     # TODO: adapt if labels are missing
@@ -42,6 +48,7 @@ def hot_encode_labels(df, columns):
     label_encoders = {col: LabelEncoder() for col in columns}
     hot_encoders = {col: OneHotEncoder() for col in columns}
     for col, label_encoder in label_encoders.items():
+        print("Hot encode label ", col)
         df[col].fillna('', inplace=True)
         label_encoded = label_encoder.fit_transform(df[col])
         df[col] = label_encoded
@@ -52,6 +59,7 @@ def hot_encode_labels(df, columns):
 
 def prepare_reference(df: pd.DataFrame, action_types):
     for action_type in action_types:
+        print("Prepare reference ", action_type)
         search_for_poi_query = df['action_type'] == action_type
         df = df.assign(**{
             action_type: df[search_for_poi_query]['reference']
@@ -69,6 +77,7 @@ def load_sessions():
     if os.path.exists(pickle_path):
         result = pickle.load(open(pickle_path, "rb"))
     else:
+        print("load csv")
         raw_df = pd.read_csv(
             train_data_path,
             sep=',',
@@ -87,29 +96,30 @@ def load_sessions():
 
         # encode labels
         encoders, label_encoders = hot_encode_labels(raw_df, columns=[
+            'session_id',
             'action_type',
             'city_0',
             'city_1',
             'platform',
             'device',
         ] + prepare_action_types)
+        print("Prepare references...")
+        raw_df['reference'] = pd.to_numeric(raw_df['reference'], errors='coerce').fillna(-1).astype(int)
 
-        print(raw_df)
-
-        raw_df['reference'] = raw_df['reference'].replace('', -1).astype(int)
-
-        # filter session_ids where the last entry is not a clickout
-        grouped = raw_df.groupby(by='session_id')
+        print("filter session_ids where the last entry is not a clickout")
         clickout_type = label_encoders['action_type'].transform(['clickout item'])[0]
-        with_clickouts = grouped['action_type'].last() == clickout_type
-        filtered_df = grouped.filter(lambda x: with_clickouts.loc[x['session_id'].head(1)])
-
-        grouped = filtered_df.groupby(by='session_id')
+        next_session_id = raw_df["session_id"].shift(-1)
+        to_delete = raw_df[(raw_df['session_id'] != next_session_id) & (raw_df['action_type'] != clickout_type)]['session_id']
+        raw_df = raw_df[~raw_df['session_id'].isin(to_delete)]
+        raw_df.reset_index(inplace=True)
+        print("groupby")
+        grouped = raw_df.groupby(by='session_id')
+        print("extract session ids")
         session_ids = np.array(list(grouped.groups.keys()))
-
+        print("shuffle session")
         np.random.shuffle(session_ids)
-
-        result = raw_df, grouped.groups, encoders, session_ids
+        print("write to disk")
+        result = raw_df, grouped, encoders, session_ids
         pickle.dump(result, open(pickle_path, "wb"))
 
     return result
@@ -145,7 +155,8 @@ def load_items():
 class RecSysData(object):
     def __init__(self):
         self.item_df, self.item_vectorizer = load_items()
-        self.session_df, self.groups, self.session_encoders, self.session_ids = load_sessions()
+        self.session_df, self.grouped, self.session_encoders, self.session_ids = load_sessions()
+        self.groups = self.grouped.groups
 
 
 rec_sys_data = None
@@ -226,5 +237,23 @@ class RecSysDataset(Dataset):
     def collator(self):
         return partial(collator, item_size=self.item_size)
 
-    def get_submission(self):
-        pass
+    def get_submission(self, predictions=None):
+        grouped = self.rec_sys_data.grouped
+        lasts = grouped.tail(1)
+
+        lasts_selected = lasts[SUBM_INDICES]
+
+        if predictions is None:
+            lasts_selected = lasts_selected.assign(
+                reference=lasts['reference'],
+                impressions=lasts['impressions'],
+                prices=lasts['prices']
+            )
+        else:
+            lasts_selected = lasts_selected.assign(
+                item_recommendations=predictions
+            )
+
+        lasts_selected.set_index(SUBM_INDICES, inplace=True)
+        return lasts_selected
+

@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
 
-indices = ['user_id', 'session_id', 'timestamp', 'step']
+SUBM_INDICES = ['user_id', 'session_id', 'timestamp', 'step']
 
 def read_into_df(file):
     """Read csv file into data frame."""
     df = (
         pd.read_csv(file)
-            .set_index(indices)
+            .set_index(SUBM_INDICES)
     )
 
     return df
@@ -43,9 +43,6 @@ def get_reciprocal_ranks(ps):
 
 
 def score_submissions(df_subm, df_gt, objective_function):
-    df_subm = df_subm.set_index(indices)
-    df_gt = df_gt.set_index(indices)
-
     """Score submissions with given objective function."""
     # create dataframe containing the ground truth to target rows
     cols = ['reference', 'impressions', 'prices']
