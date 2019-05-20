@@ -1,3 +1,4 @@
 sklearn
 pandas
 torchvision
+progressbar2

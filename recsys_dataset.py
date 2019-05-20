@@ -68,7 +68,7 @@ def prepare_reference(df: pd.DataFrame, action_types):
     return df
 
 
-def load_sessions():
+def load_sessions(item_df):
     from main import RAW_DATA_PATH, DATA_PATH, DEBUG
 
     train_data_path = os.path.join(RAW_DATA_PATH, 'train.csv')
@@ -106,8 +106,29 @@ def load_sessions():
         print("Prepare references...")
         raw_df['reference'] = pd.to_numeric(raw_df['reference'], errors='coerce').fillna(-1).astype(int)
 
-        print("filter session_ids where the last entry is not a clickout")
         clickout_type = label_encoders['action_type'].transform(['clickout item'])[0]
+        print("filter references which do not exist")
+        join_item_df = item_df.copy()
+        join_item_df['properties'] = ''
+        joined_raw_df = pd.merge(
+            raw_df[['reference']],
+            join_item_df,
+            left_on='reference',
+            right_index=True,
+            how='left',
+        )
+        referencing_action_type = label_encoders['action_type'].transform([
+            'clickout item',
+            'interaction item rating',
+            'interaction item info',
+            'interaction item image',
+            'interaction item deals',
+            'search for item',
+        ])
+        raw_df = raw_df[~((joined_raw_df['properties'].isnull()) & (raw_df['action_type'].isin(referencing_action_type)))]
+        raw_df.reset_index(inplace=True)
+
+        print("filter session_ids where the last entry is not a clickout")
         next_session_id = raw_df["session_id"].shift(-1)
         to_delete = raw_df[(raw_df['session_id'] != next_session_id) & (raw_df['action_type'] != clickout_type)]['session_id']
         raw_df = raw_df[~raw_df['session_id'].isin(to_delete)]
@@ -155,7 +176,9 @@ def load_items():
 class RecSysData(object):
     def __init__(self):
         self.item_df, self.item_vectorizer = load_items()
-        self.session_df, self.grouped, self.session_encoders, self.session_ids = load_sessions()
+        self.session_df, self.grouped, self.session_encoders, self.session_ids = load_sessions(
+            item_df=self.item_df
+        )
         self.groups = self.grouped.groups
 
 
@@ -218,7 +241,9 @@ class RecSysDataset(Dataset):
             how='left',
         )
         item_impressions_id_df = np.array(item_impressions_df['impression'])
-        item_impressions_df = np.array(item_vectorizer.transform(item_impressions_df['properties']).todense())
+        impression_properties = item_impressions_df['properties']
+        impression_properties.fillna('', inplace=True)
+        item_impressions_df = np.array(item_vectorizer.transform(impression_properties).todense())
 
         result = [item_properties, item_impressions_df, item_impressions_id_df]
         if target_properties is not None:

@@ -1,6 +1,7 @@
 import os
 import random
 
+import progressbar
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -15,11 +16,11 @@ import numpy as np
 
 DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
-DEBUG = False
+DEBUG = True
 
 HIDDEN_DIM = 128
 
-NUM_WORKERS = 4
+NUM_WORKERS = 0
 
 BATCH_SIZE = 32
 
@@ -72,7 +73,7 @@ if __name__ == '__main__':
             predictions_ptr = 0
             losses.fill(0)
 
-            for idx, (item_properties, item_impressions, impression_ids, targets) in enumerate(data_loaders[phase]):
+            for idx, (item_properties, item_impressions, impression_ids, targets) in progressbar.progressbar(enumerate(data_loaders[phase])):
                 item_properties = item_properties.to(device)
                 targets = targets.to(device)
 
@@ -86,7 +87,6 @@ if __name__ == '__main__':
                         loss.backward()
                         optimizer.step()
                         losses[idx] = loss.item()
-                        network.eval()
 
                     for impression_id, item_impression, item_score in zip(impression_ids, item_impressions, item_scores):
                         item_score_repeated = item_score.repeat(len(item_impression), 1)
