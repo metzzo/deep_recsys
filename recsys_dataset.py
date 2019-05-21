@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import pickle
 
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 import torch
 
@@ -192,6 +192,19 @@ def load_sessions(item_df):
         item_properties = item_df.loc[raw_df['reference']]
         item_properties.reset_index(inplace=True, drop=True)
         item_properties.fillna(0.0, inplace=True)
+
+        print("get delta times")
+        last_timestamp = raw_df["timestamp"].shift(-1)
+        next_session_id = raw_df["session_id"].shift(-1)
+        raw_df['delta_time'] = last_timestamp - raw_df["timestamp"]
+        raw_df.loc[(raw_df['session_id'] != next_session_id), 'delta_time'] = 0
+
+        delta_time_scaler = StandardScaler()
+        scaled = raw_df[['delta_time', 'step']].values.reshape(-1, 1)
+        scaled = delta_time_scaler.fit_transform(scaled)
+        raw_df['delta_time'], raw_df['step'] = scaled[:, 0], scaled[:, 1]
+        encoders['delta_time_step'] = delta_time_scaler
+
         """
         print("split into target_item_properties vs item_properties")
         next_session_id = raw_df["session_id"].shift(-1)
@@ -261,6 +274,9 @@ def load_items():
     return result
 
 
+
+
+
 class RecSysData(object):
     def __init__(self):
         self.item_df, self.item_vectorizer = load_items()
@@ -269,7 +285,6 @@ class RecSysData(object):
             item_df=self.item_df
         )
         self.groups = self.grouped.groups
-
 
 rec_sys_data = None
 
@@ -330,7 +345,9 @@ class RecSysDataset(Dataset):
 
         result = [np.hstack([
             item_properties,
-            action_type
+            action_type,
+#            session['delta_time'].values.reshape(-1, 1)[:-1],
+#            session['step'].values.reshape(-1, 1)[:-1],
         ])]
         simple_result = []
         if self.include_impressions:

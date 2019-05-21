@@ -7,12 +7,13 @@ class LSTMNetwork(nn.Module):
         super(LSTMNetwork, self).__init__()
         from main import BATCH_SIZE
         self.hidden_dim = hidden_dim
-        self.gru = nn.GRU(item_size, hidden_dim, batch_first=True, num_layers=1)
+        self.gru = nn.GRU(item_size, hidden_dim, batch_first=True, num_layers=2, dropout=0.0)
         self.item_size = item_size
         self.target_item_size = target_item_size
         self.batch_size = BATCH_SIZE
 
         self.hidden2tag = nn.Sequential(
+            nn.Dropout(0.3),
             nn.Linear(hidden_dim, 200),
             nn.BatchNorm1d(num_features=200),
             nn.ReLU(),

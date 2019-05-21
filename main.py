@@ -1,10 +1,12 @@
 import datetime
 import os
 import random
+import shutil
 
 import progressbar
 import torch
 from torch import nn, optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from functions import score_submissions, get_reciprocal_ranks, SUBM_INDICES
@@ -19,10 +21,11 @@ DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
 
 MODEL_NAME = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+MODEL_BASE_PATH = os.path.join(DATA_PATH, 'model')
 MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".model")
 DEBUG = False
 
-HIDDEN_DIM = 64
+HIDDEN_DIM = 128
 
 NUM_WORKERS = 0 if DEBUG else 0
 
@@ -30,11 +33,9 @@ PATIENCE = 100
 
 BATCH_SIZE = 128
 
-ONLY_VALIDATE_VALIDATION = True
-
 CALC_BASELINE = True
 
-NUM_EPOCHS = 500
+NUM_EPOCHS = 1000
 
 if __name__ == '__main__':
     random.seed(42)
@@ -44,6 +45,7 @@ if __name__ == '__main__':
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     train_dataset = RecSysDataset(split=0.7, before=True, include_impressions=False, train_mode=True)
+    train_val_dataset = RecSysDataset(split=0.7, before=True, include_impressions=True)
     val_dataset = RecSysDataset(split=0.7, before=False, include_impressions=True)
 
     network = LSTMNetwork(
@@ -53,20 +55,25 @@ if __name__ == '__main__':
         device=device
     )
     loss_function = nn.MSELoss()
-    optimizer = optim.Adam(network.parameters(), lr=0.01)
+    optimizer = optim.Adam(network.parameters(), lr=0.01, weight_decay=0.00001)
+    lr_scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=75)
+
 
     datasets = {
         "train": train_dataset,
+        "train_val": train_dataset,
         "val": val_dataset,
     }
 
     data_loaders = {
         "train": DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, collate_fn=train_dataset.collator),
+        "train_val": DataLoader(train_val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, collate_fn=train_val_dataset.collator),
         "val": DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, collate_fn=val_dataset.collator),
     }
 
     sizes = {
         "train": int(len(train_dataset) / BATCH_SIZE) + 1,
+        "train_val": int(len(train_dataset) / BATCH_SIZE) + 1,
         "val": int(len(val_dataset) / BATCH_SIZE) + 1,
     }
 
@@ -79,7 +86,7 @@ if __name__ == '__main__':
     cur_patience = 0
     for epoch in range(NUM_EPOCHS):
         print('-'*15, "Epoch: ", epoch + 1, '\t', '-'*15)
-        for phase in ['train', 'val']:
+        for phase in ['train', 'train_val', 'val']:
             cur_dataset = datasets[phase]
             cur_predictions = pd.DataFrame.from_dict({
                 'user_id': [''] * len(cur_dataset),
@@ -94,7 +101,7 @@ if __name__ == '__main__':
             else:
                 network.eval()
 
-            do_validation = phase == 'val' or not ONLY_VALIDATE_VALIDATION
+            do_validation = phase != 'train'
             losses.fill(0)
             with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
                 for idx, data in enumerate(data_loaders[phase]):
@@ -146,7 +153,7 @@ if __name__ == '__main__':
 
                 score = score_submissions(df_subm=predicted_df, df_gt=ground_truth_df, objective_function=get_reciprocal_ranks)
                 print(phase, " Score: ", score)
-
+                lr_scheduler.step(score)
                 if phase == 'val':
                     if best_score_so_far is None or score > best_score_so_far:
                         torch.save(network.state_dict(), MODEL_PATH)
@@ -164,4 +171,10 @@ if __name__ == '__main__':
             break
 
     print("Final best model: ", best_score_so_far)
-    os.rename(MODEL_PATH, '{}_{}.model'.format(MODEL_NAME, round(best_score_so_far, 2)))
+    shutil.move(
+        MODEL_PATH,
+        os.path.join(
+            MODEL_BASE_PATH,
+            '{}_{}.model'.format(MODEL_NAME, round(best_score_so_far, 2))
+        )
+    )
