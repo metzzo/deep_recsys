@@ -1,3 +1,4 @@
+import datetime
 import os
 import random
 
@@ -6,7 +7,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
-from functions import score_submissions, get_reciprocal_ranks
+from functions import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 from network import LSTMNetwork
 from recsys_dataset import RecSysDataset
 
@@ -16,13 +17,22 @@ import numpy as np
 
 DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
-DEBUG = True
+MODEL_PATH = os.path.join(DATA_PATH, 'model', datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S.model'))
+DEBUG = False
 
-HIDDEN_DIM = 128
+HIDDEN_DIM = 64
 
-NUM_WORKERS = 0
+NUM_WORKERS = 0 if DEBUG else 0
 
-BATCH_SIZE = 32
+PATIENCE = 10
+
+BATCH_SIZE = 128
+
+ONLY_VALIDATE_VALIDATION = True
+
+CALC_BASELINE = True
+
+NUM_EPOCHS = 500
 
 if __name__ == '__main__':
     random.seed(42)
@@ -31,15 +41,17 @@ if __name__ == '__main__':
     print("Uses CUDA: {0}".format(use_cuda))
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    train_dataset = RecSysDataset(split=0.8, before=True)
-    val_dataset = RecSysDataset(split=0.8, before=True)
+    train_dataset = RecSysDataset(split=0.7, before=True, include_impressions=not ONLY_VALIDATE_VALIDATION, train_mode=True)
+    val_dataset = RecSysDataset(split=0.3, before=True, include_impressions=True)
 
     network = LSTMNetwork(
         hidden_dim=HIDDEN_DIM,
-        item_size=train_dataset.item_size
+        item_size=train_dataset.item_size,
+        target_item_size=train_dataset.target_item_size,
+        device=device
     )
     loss_function = nn.MSELoss()
-    optimizer = optim.SGD(network.parameters(), lr=0.01)
+    optimizer = optim.Adam(network.parameters(), lr=0.1)
 
     datasets = {
         "train": train_dataset,
@@ -51,55 +63,95 @@ if __name__ == '__main__':
         "val": DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, collate_fn=val_dataset.collator),
     }
 
-    predictions = {
-        "train": pd.Series([''] * len(train_dataset)),
-        "val": pd.Series([''] * len(val_dataset))
+    sizes = {
+        "train": int(len(train_dataset) / BATCH_SIZE) + 1,
+        "val": int(len(val_dataset) / BATCH_SIZE) + 1,
     }
 
     losses = np.zeros(int(len(train_dataset) / BATCH_SIZE + 1.0))
 
     network = network.to(device)
-    for epoch in range(100):
-        print('-'*15, "Epoch: ", epoch, '\t', '-'*15)
+
+    best_score_so_far = None
+
+    cur_patience = 0
+    for epoch in range(NUM_EPOCHS):
+        print('-'*15, "Epoch: ", epoch + 1, '\t', '-'*15)
         for phase in ['train', 'val']:
             cur_dataset = datasets[phase]
-            cur_predictions = predictions[phase]
-
+            cur_predictions = pd.DataFrame.from_dict({
+                'user_id': [''] * len(cur_dataset),
+                'session_id': [''] * len(cur_dataset),
+                'timestamp': [''] * len(cur_dataset),
+                'step': [''] * len(cur_dataset),
+                'item_recommendations': [''] * len(cur_dataset),
+            })
+            prediction_ptr = 0
             if phase == 'train':
                 network.train()
             else:
                 network.eval()
 
-            predictions_ptr = 0
+            do_validation = phase == 'val' or not ONLY_VALIDATE_VALIDATION
             losses.fill(0)
+            with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
+                for idx, data in enumerate(data_loaders[phase]):
+                    if do_validation:
+                        sessions, session_lengths, session_targets, item_impressions, impression_ids, ids = data
+                    else:
+                        sessions, session_lengths, session_targets = data
+                        impression_ids = None
+                        item_impressions = None
+                        ids = None
 
-            for idx, (item_properties, item_impressions, impression_ids, targets) in progressbar.progressbar(enumerate(data_loaders[phase])):
-                item_properties = item_properties.to(device)
-                targets = targets.to(device)
+                    sessions = sessions.to(device)
+                    session_targets = session_targets.to(device)
 
-                optimizer.zero_grad()
+                    optimizer.zero_grad()
 
-                with torch.set_grad_enabled(phase == 'train'):
-                    item_scores = network(item_properties).double()
-                    loss = loss_function(item_scores, targets)
+                    with torch.set_grad_enabled(phase == 'train'):
+                        item_scores = network(sessions, session_lengths).float()
 
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
-                        losses[idx] = loss.item()
+                        if phase == 'train':
+                            loss = loss_function(item_scores, session_targets)
+                            loss.backward()
+                            optimizer.step()
+                            losses[idx] = loss.item()
+                    if do_validation:
+                        item_scores = item_scores.to(device)
+                        for id, impression_id, item_impression, item_score in zip(ids, impression_ids, item_impressions, item_scores):
+                            impression_id = impression_id.to(device)
+                            item_impression = item_impression.to(device).float()
 
-                    for impression_id, item_impression, item_score in zip(impression_ids, item_impressions, item_scores):
-                        item_score_repeated = item_score.repeat(len(item_impression), 1)
-                        sim = F.cosine_similarity(item_score_repeated.cpu(), item_impression)
-                        sorted = torch.argsort(sim, descending=True)
-                        sorted_impressions = ' '.join(torch.gather(impression_id, 0, sorted).detach().cpu().numpy().astype(str))
-                        cur_predictions.iloc[predictions_ptr] = sorted_impressions
-                        predictions_ptr += 1
+                            item_score_repeated = item_score.repeat(len(item_impression), 1)
+                            sim = F.cosine_similarity(item_score_repeated, item_impression)
+                            sorted = torch.argsort(sim, descending=True)
+                            sorted_impressions = ' '.join(torch.gather(impression_id, 0, sorted).cpu().numpy().astype(str))
+                            cur_predictions.iloc[prediction_ptr].at['item_recommendations'] = sorted_impressions
+                            cur_predictions.iloc[prediction_ptr].at['user_id'] = id['user_id']
+                            cur_predictions.iloc[prediction_ptr].at['session_id'] = id['session_id']
+                            cur_predictions.iloc[prediction_ptr].at['timestamp'] = id['timestamp']
+                            cur_predictions.iloc[prediction_ptr].at['step'] = id['step']
+                            prediction_ptr += 1
+                    bar.update(idx)
+            if do_validation:
+                cur_predictions.set_index(SUBM_INDICES, inplace=True)
 
-            ground_truth_df = cur_dataset.get_submission()
-            predicted_df = cur_dataset.get_submission(cur_predictions)
+                ground_truth_df = cur_dataset.get_submission()
+                predicted_df = cur_predictions
 
-            score = score_submissions(df_subm=predicted_df, df_gt=ground_truth_df, objective_function=get_reciprocal_ranks)
-            print(phase, " Score: ", score)
+                score = score_submissions(df_subm=predicted_df, df_gt=ground_truth_df, objective_function=get_reciprocal_ranks)
+                print(phase, " Score: ", score)
+
+                if phase == 'val'
+                    if best_score_so_far is None or score > best_score_so_far:
+                        torch.save(network.state_dict(), MODEL_PATH)
+                        best_score_so_far = score
+                        cur_patience =0
+                    else:
+                        cur_patience += 1
+                        if cur_patience > PATIENCE:
+                            print("Not patient anymore => Quit")
+                            break
             if phase == 'train':
                 print(phase, " Loss: ", losses.mean())

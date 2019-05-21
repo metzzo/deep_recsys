@@ -1,4 +1,6 @@
+from collections import namedtuple
 from functools import partial
+from random import randint
 
 from torch.utils.data.dataset import Dataset
 
@@ -17,20 +19,62 @@ from warnings import simplefilter
 # ignore all future warnings
 simplefilter(action='ignore', category=FutureWarning)
 
+RecSysSampleWithImpressions = namedtuple('RecSysSampleWithImpressions', [
+    'sessions',
+    'session_lengths',
+    'session_targets',
+    'impressions',
+    'impression_ids',
+    'ids',
+], verbose=False)
 
-def collator(items, item_size):
-    # TODO: adapt if labels are missing
-    data, impressions, impression_ids, labels = zip(*items)
+RecSysSample = namedtuple('RecSysSample', [
+    'sessions',
+    'session_lengths',
+    'session_targets',
+], verbose=False)
 
-    labels = torch.stack(labels, 0)
+
+def _internal_collator(data, session_targets, item_size):
+    session_targets = torch.stack(session_targets, 0)
 
     lengths = [len(cap) for cap in data]
-    padded_items = torch.zeros(len(data), max(lengths), item_size).float()
+    sessions = torch.zeros(len(data), max(lengths), item_size).float()
     for i, cap in enumerate(data):
         end = lengths[i]
-        padded_items[i, :end] = cap[:end]
+        sessions[i, :end] = cap[:end]
 
-    return padded_items, impressions, impression_ids, labels
+    return sessions, torch.tensor(lengths), session_targets
+
+
+def collator_with_impressions(items, item_size):
+    # TODO: adapt if labels are missing
+    items.sort(key=lambda x: len(x[0]), reverse=True)
+
+    data, impressions, impression_ids, labels, ids = zip(*items)
+
+    sessions, session_lengths, session_targets = _internal_collator(data, labels, item_size)
+
+    return RecSysSampleWithImpressions(
+        sessions=sessions,
+        session_lengths=session_lengths,
+        session_targets=session_targets,
+        impressions=impressions,
+        impression_ids=impression_ids,
+        ids=ids,
+    )
+
+
+def collator_without_impressions(items, item_size):
+    items.sort(key=lambda x: len(x[0]), reverse=True)
+    # TODO: adapt if labels are missing
+    data, labels = zip(*items)
+    sessions, session_lengths, session_targets = _internal_collator(data, labels, item_size)
+    return RecSysSample(
+        sessions=sessions,
+        session_lengths=session_lengths,
+        session_targets=session_targets,
+    )
 
 
 def split_row(df, column, sep):
@@ -38,10 +82,13 @@ def split_row(df, column, sep):
     s = s.rename(lambda x: '{}_{}'.format(column, x), axis=1)
     df = df.drop(column, axis=1)
 
-    return pd.concat([
+    result = pd.concat([
         df,
         s
     ], axis=1)
+    del df
+    del s
+    return result
 
 
 def hot_encode_labels(df, columns):
@@ -53,6 +100,7 @@ def hot_encode_labels(df, columns):
         label_encoded = label_encoder.fit_transform(df[col])
         df[col] = label_encoded
         hot_encoders[col].fit(label_encoded.reshape(-1, 1))
+        del label_encoded
 
     return hot_encoders, label_encoders
 
@@ -60,11 +108,14 @@ def hot_encode_labels(df, columns):
 def prepare_reference(df: pd.DataFrame, action_types):
     for action_type in action_types:
         print("Prepare reference ", action_type)
-        search_for_poi_query = df['action_type'] == action_type
+        query = df['action_type'] == action_type
+        old_df = df
         df = df.assign(**{
-            action_type: df[search_for_poi_query]['reference']
+            action_type: df[query]['reference']
         })
-        df['reference'][search_for_poi_query] = ''
+        del old_df
+        # TODO: stranger danger - pandas warning SettingWithCopyWarning
+        df['reference'][query] = ''
     return df
 
 
@@ -73,15 +124,20 @@ def load_sessions(item_df):
 
     train_data_path = os.path.join(RAW_DATA_PATH, 'train.csv')
     pickle_path = os.path.join(DATA_PATH, 'sessions.p')
+    pickle_path_item_properties = os.path.join(DATA_PATH, 'item_properties_sessions.p')
+    #pickle_path_target_item_properties = os.path.join(DATA_PATH, 'target_item_properties_sessions.p')
 
     if os.path.exists(pickle_path):
         result = pickle.load(open(pickle_path, "rb"))
+        item_properties = pickle.load(open(pickle_path_item_properties, "rb"))
+        #target_item_properties = pickle.load(open(pickle_path_target_item_properties, "rb"))
+        return result + (item_properties, ) #target_item_properties)
     else:
         print("load csv")
         raw_df = pd.read_csv(
             train_data_path,
             sep=',',
-            nrows=1000 if DEBUG else None
+            nrows=1000 if DEBUG else 10000 #TODO: change back to None for full dataset
         )
         raw_df = split_row(raw_df, column='city', sep=',')
 
@@ -103,20 +159,12 @@ def load_sessions(item_df):
             'platform',
             'device',
         ] + prepare_action_types)
-        print("Prepare references...")
+        print("Remove invalid references...")
         raw_df['reference'] = pd.to_numeric(raw_df['reference'], errors='coerce').fillna(-1).astype(int)
 
         clickout_type = label_encoders['action_type'].transform(['clickout item'])[0]
         print("filter references which do not exist")
-        join_item_df = item_df.copy()
-        join_item_df['properties'] = ''
-        joined_raw_df = pd.merge(
-            raw_df[['reference']],
-            join_item_df,
-            left_on='reference',
-            right_index=True,
-            how='left',
-        )
+
         referencing_action_type = label_encoders['action_type'].transform([
             'clickout item',
             'interaction item rating',
@@ -125,23 +173,52 @@ def load_sessions(item_df):
             'interaction item deals',
             'search for item',
         ])
-        raw_df = raw_df[~((joined_raw_df['properties'].isnull()) & (raw_df['action_type'].isin(referencing_action_type)))]
+        item_properties = item_df.loc[raw_df['reference']]
+        item_properties.reset_index(inplace=True, drop=True)
+        raw_df = raw_df[~((item_properties[0].isnull()) & (raw_df['action_type'].isin(referencing_action_type)))]
         raw_df.reset_index(inplace=True)
 
         print("filter session_ids where the last entry is not a clickout")
         next_session_id = raw_df["session_id"].shift(-1)
         to_delete = raw_df[(raw_df['session_id'] != next_session_id) & (raw_df['action_type'] != clickout_type)]['session_id']
         raw_df = raw_df[~raw_df['session_id'].isin(to_delete)]
-        raw_df.reset_index(inplace=True)
+        raw_df.reset_index(inplace=True, drop=True)
+
+        print("prepare reference item_ids")
+        item_properties = item_df.loc[raw_df['reference']]
+        item_properties.reset_index(inplace=True, drop=True)
+        item_properties.fillna(0.0, inplace=True)
+        """
+        print("split into target_item_properties vs item_properties")
+        next_session_id = raw_df["session_id"].shift(-1)
+        target_item_properties = item_properties[
+            (raw_df['session_id'] != next_session_id)
+        ]
+        item_properties[
+            (raw_df['session_id'] != next_session_id)
+        ] = 0.0
+        """
+
+        raw_df.drop([
+            'index',
+        ], axis=1, inplace=True)
+
         print("groupby")
         grouped = raw_df.groupby(by='session_id')
         print("extract session ids")
         session_ids = np.array(list(grouped.groups.keys()))
+        train_sessions = grouped[['step']].max()
+        train_session_ids = list(train_sessions[train_sessions['step'] > 1].index)
+
         print("shuffle session")
         np.random.shuffle(session_ids)
         print("write to disk")
-        result = raw_df, grouped, encoders, session_ids
+        result = raw_df, grouped, encoders, session_ids, train_session_ids
         pickle.dump(result, open(pickle_path, "wb"))
+        pickle.dump(item_properties, open(pickle_path_item_properties, "wb"), protocol=4)
+        #pickle.dump(target_item_properties, open(pickle_path_target_item_properties, "wb"), protocol=4)
+
+        result += (item_properties, )# target_item_properties)
 
     return result
 
@@ -162,13 +239,16 @@ def load_items():
         )
         tfidf_vectorizer = TfidfVectorizer(
             strip_accents='unicode',
-            min_df=0.01
+            #min_df=0.01,
+            binary=True,
+            use_idf=False,
+            norm=None
         )
-        tfidf_vectorizer.fit(raw_df['properties'])
+        item_properties = tfidf_vectorizer.fit_transform(raw_df['properties'])
+        item_properties = pd.DataFrame(item_properties.toarray())
+        item_properties.set_index(raw_df['item_id'], inplace=True)
 
-        raw_df.set_index('item_id', inplace=True)
-
-        result = raw_df, tfidf_vectorizer
+        result = item_properties, tfidf_vectorizer
         pickle.dump(result, open(pickle_path, "wb"))
     return result
 
@@ -176,7 +256,8 @@ def load_items():
 class RecSysData(object):
     def __init__(self):
         self.item_df, self.item_vectorizer = load_items()
-        self.session_df, self.grouped, self.session_encoders, self.session_ids = load_sessions(
+        # , self.target_item_properties
+        self.session_df, self.grouped, self.session_encoders, self.session_ids, self.train_session_ids, self.item_properties = load_sessions(
             item_df=self.item_df
         )
         self.groups = self.grouped.groups
@@ -186,98 +267,98 @@ rec_sys_data = None
 
 
 class RecSysDataset(Dataset):
-    def __init__(self, split, before):
+    def __init__(self, split, before, include_impressions, train_mode=False):
         global rec_sys_data
         if rec_sys_data is None:
             rec_sys_data = RecSysData()
         self.rec_sys_data = rec_sys_data
+        self.include_impressions = include_impressions
+        item_feature_size = len(self.rec_sys_data.item_vectorizer.get_feature_names())
+        # size of item vector
+        # + action_type one hot encoding
+        self.item_size = item_feature_size + 10
+        self.target_item_size = item_feature_size
+        self.train_mode = train_mode
 
-        sid = self.rec_sys_data.session_ids
+        # TODO: neural network does not support sessions with length 1
+        sid = self.rec_sys_data.train_session_ids # if not train_mode else self.rec_sys_data.train_session_ids
         split_index = int(len(sid) * split)
         if before:
             self.session_ids = sid[:split_index]
         else:
             self.session_ids = sid[split_index:]
 
+        self.empty_array = np.array(0)
+
     def __getitem__(self, index):
-        session = self.rec_sys_data.session_df.iloc[
-            self.rec_sys_data.groups[
-                self.session_ids[index]
-            ]
+        indices = self.rec_sys_data.groups[
+            self.session_ids[index]
         ]
 
-        merged_with_reference = pd.merge(
-            session,
-            self.rec_sys_data.item_df,
-            left_on='reference',
-            right_index=True,
-            how='left',
-        )
+        # augment data by making this session shorter
+        if self.train_mode:
+            indices = indices.to_numpy()[:randint(2, len(indices))]
 
-        item_vectorizer = self.rec_sys_data.item_vectorizer
+        session = self.rec_sys_data.session_df.loc[
+            indices
+        ]
 
-        last_row = merged_with_reference.iloc[-1]
-        last_reference = last_row['reference']
-        last_impressions = last_row['impressions']
+        target_properties = self.rec_sys_data.item_properties.loc[
+            indices[-1]
+        ]
 
-        target_properties = None
-        if last_reference != -1:
-            # this is our label
-            merged_with_reference['properties'].iat[-1] = ''
-            target_raw_properties = self.rec_sys_data.item_df.loc[last_reference]
-            target_properties = np.array(item_vectorizer.transform(target_raw_properties).todense()).flatten()
+        item_properties = np.array(self.rec_sys_data.item_properties.loc[
+            indices[:-1]
+        ])
 
-        raw_properties = merged_with_reference['properties']
-        raw_properties.fillna('', inplace=True)
+        action_type_encoder = self.rec_sys_data.session_encoders['action_type']
+        session_action_type = session['action_type'][:-1]
+        action_type = action_type_encoder.transform(np.array(session_action_type).reshape(-1, 1)).toarray()
 
-        item_properties = item_vectorizer.transform(raw_properties).todense()
+        result = [np.hstack([
+            item_properties,
+            action_type
+        ])]
+        simple_result = []
+        if self.include_impressions:
+            last_row = session.iloc[-1]
 
-        item_impressions_df = pd.DataFrame(map(int, last_impressions.split('|')), columns=['impression'])
-        item_impressions_df = pd.merge(
-            item_impressions_df,
-            self.rec_sys_data.item_df,
-            left_on='impression',
-            right_index=True,
-            how='left',
-        )
-        item_impressions_id_df = np.array(item_impressions_df['impression'])
-        impression_properties = item_impressions_df['properties']
-        impression_properties.fillna('', inplace=True)
-        item_impressions_df = np.array(item_vectorizer.transform(impression_properties).todense())
+            last_impressions = last_row['impressions']
+            item_impressions_df = pd.DataFrame(map(int, last_impressions.split('|')), columns=['impression'])
 
-        result = [item_properties, item_impressions_df, item_impressions_id_df]
+            item_impressions_id = np.array(item_impressions_df['impression'])
+            item_impressions = np.array(self.rec_sys_data.item_df.loc[item_impressions_id])
+            result += [item_impressions, item_impressions_id]
+            simple_result += [last_row[SUBM_INDICES]]
+
         if target_properties is not None:
             result = result + [target_properties]
 
-        return list(map(torch.tensor, result))
+        return list(map(torch.tensor, result)) + simple_result
 
     def __len__(self):
         return len(self.session_ids)
 
     @property
-    def item_size(self):
-        return len(self.rec_sys_data.item_vectorizer._tfidf.idf_)
-
-    @property
     def collator(self):
-        return partial(collator, item_size=self.item_size)
+        if self.include_impressions:
+            col = collator_with_impressions
+        else:
+            col = collator_without_impressions
 
-    def get_submission(self, predictions=None):
+        return partial(col, item_size=self.item_size)
+
+    def get_submission(self):
         grouped = self.rec_sys_data.grouped
         lasts = grouped.tail(1)
 
         lasts_selected = lasts[SUBM_INDICES]
 
-        if predictions is None:
-            lasts_selected = lasts_selected.assign(
-                reference=lasts['reference'],
-                impressions=lasts['impressions'],
-                prices=lasts['prices']
-            )
-        else:
-            lasts_selected = lasts_selected.assign(
-                item_recommendations=predictions
-            )
+        lasts_selected = lasts_selected.assign(
+            reference=lasts['reference'],
+            impressions=lasts['impressions'],
+            prices=lasts['prices']
+        )
 
         lasts_selected.set_index(SUBM_INDICES, inplace=True)
         return lasts_selected
