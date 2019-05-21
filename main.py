@@ -24,7 +24,7 @@ HIDDEN_DIM = 64
 
 NUM_WORKERS = 0 if DEBUG else 0
 
-PATIENCE = 10
+PATIENCE = 100
 
 BATCH_SIZE = 128
 
@@ -42,7 +42,7 @@ if __name__ == '__main__':
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     train_dataset = RecSysDataset(split=0.7, before=True, include_impressions=not ONLY_VALIDATE_VALIDATION, train_mode=True)
-    val_dataset = RecSysDataset(split=0.3, before=True, include_impressions=True)
+    val_dataset = RecSysDataset(split=0.7, before=False, include_impressions=True)
 
     network = LSTMNetwork(
         hidden_dim=HIDDEN_DIM,
@@ -51,7 +51,7 @@ if __name__ == '__main__':
         device=device
     )
     loss_function = nn.MSELoss()
-    optimizer = optim.Adam(network.parameters(), lr=0.1)
+    optimizer = optim.Adam(network.parameters(), lr=0.01)
 
     datasets = {
         "train": train_dataset,
@@ -117,6 +117,7 @@ if __name__ == '__main__':
                             loss.backward()
                             optimizer.step()
                             losses[idx] = loss.item()
+
                     if do_validation:
                         item_scores = item_scores.to(device)
                         for id, impression_id, item_impression, item_score in zip(ids, impression_ids, item_impressions, item_scores):
@@ -127,11 +128,12 @@ if __name__ == '__main__':
                             sim = F.cosine_similarity(item_score_repeated, item_impression)
                             sorted = torch.argsort(sim, descending=True)
                             sorted_impressions = ' '.join(torch.gather(impression_id, 0, sorted).cpu().numpy().astype(str))
-                            cur_predictions.iloc[prediction_ptr].at['item_recommendations'] = sorted_impressions
-                            cur_predictions.iloc[prediction_ptr].at['user_id'] = id['user_id']
-                            cur_predictions.iloc[prediction_ptr].at['session_id'] = id['session_id']
-                            cur_predictions.iloc[prediction_ptr].at['timestamp'] = id['timestamp']
-                            cur_predictions.iloc[prediction_ptr].at['step'] = id['step']
+                            cur_pred = cur_predictions.iloc[prediction_ptr]
+                            cur_pred.at['item_recommendations'] = sorted_impressions
+                            cur_pred.at['user_id'] = id['user_id']
+                            cur_pred.at['session_id'] = id['session_id']
+                            cur_pred.at['timestamp'] = id['timestamp']
+                            cur_pred.at['step'] = id['step']
                             prediction_ptr += 1
                     bar.update(idx)
             if do_validation:
@@ -143,11 +145,12 @@ if __name__ == '__main__':
                 score = score_submissions(df_subm=predicted_df, df_gt=ground_truth_df, objective_function=get_reciprocal_ranks)
                 print(phase, " Score: ", score)
 
-                if phase == 'val'
+                if phase == 'val':
                     if best_score_so_far is None or score > best_score_so_far:
                         torch.save(network.state_dict(), MODEL_PATH)
                         best_score_so_far = score
-                        cur_patience =0
+                        cur_patience = 0
+                        print("New best \\o/")
                     else:
                         cur_patience += 1
                         if cur_patience > PATIENCE:
@@ -155,3 +158,5 @@ if __name__ == '__main__':
                             break
             if phase == 'train':
                 print(phase, " Loss: ", losses.mean())
+        if cur_patience > PATIENCE:
+            break

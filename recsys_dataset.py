@@ -1,6 +1,6 @@
 from collections import namedtuple
 from functools import partial
-from random import randint
+from random import randint, shuffle
 
 from torch.utils.data.dataset import Dataset
 
@@ -108,6 +108,8 @@ def hot_encode_labels(df, columns):
 def prepare_reference(df: pd.DataFrame, action_types):
     for action_type in action_types:
         print("Prepare reference ", action_type)
+        df = df[~df['action_type'].isin(action_types)]
+        """
         query = df['action_type'] == action_type
         old_df = df
         df = df.assign(**{
@@ -116,6 +118,8 @@ def prepare_reference(df: pd.DataFrame, action_types):
         del old_df
         # TODO: stranger danger - pandas warning SettingWithCopyWarning
         df['reference'][query] = ''
+        """
+    df.reset_index(inplace=True, drop=True)
     return df
 
 
@@ -137,7 +141,7 @@ def load_sessions(item_df):
         raw_df = pd.read_csv(
             train_data_path,
             sep=',',
-            nrows=1000 if DEBUG else 10000 #TODO: change back to None for full dataset
+            nrows=1000 if DEBUG else 100000 #TODO: change back to None for full dataset
         )
         raw_df = split_row(raw_df, column='city', sep=',')
 
@@ -158,7 +162,7 @@ def load_sessions(item_df):
             'city_1',
             'platform',
             'device',
-        ] + prepare_action_types)
+        ]) # + prepare_action_types)
         print("Remove invalid references...")
         raw_df['reference'] = pd.to_numeric(raw_df['reference'], errors='coerce').fillna(-1).astype(int)
 
@@ -207,11 +211,15 @@ def load_sessions(item_df):
         grouped = raw_df.groupby(by='session_id')
         print("extract session ids")
         session_ids = np.array(list(grouped.groups.keys()))
-        train_sessions = grouped[['step']].max()
-        train_session_ids = list(train_sessions[train_sessions['step'] > 1].index)
+        np.random.shuffle(session_ids)
+
+        train_sessions = grouped[['step']].count()
+
+        train_session_ids = np.array(list(train_sessions[train_sessions['step'] > 1].index))
+        print("shuffle train session")
+        np.random.shuffle(train_session_ids)
 
         print("shuffle session")
-        np.random.shuffle(session_ids)
         print("write to disk")
         result = raw_df, grouped, encoders, session_ids, train_session_ids
         pickle.dump(result, open(pickle_path, "wb"))
@@ -276,7 +284,7 @@ class RecSysDataset(Dataset):
         item_feature_size = len(self.rec_sys_data.item_vectorizer.get_feature_names())
         # size of item vector
         # + action_type one hot encoding
-        self.item_size = item_feature_size + 10
+        self.item_size = item_feature_size + 6
         self.target_item_size = item_feature_size
         self.train_mode = train_mode
 
@@ -296,8 +304,10 @@ class RecSysDataset(Dataset):
         ]
 
         # augment data by making this session shorter
-        if self.train_mode:
-            indices = indices.to_numpy()[:randint(2, len(indices))]
+        if self.train_mode and len(indices) > 3:
+            start_pos = randint(0, len(indices) - 3)
+            end_pos = randint(start_pos + 2, len(indices) - 1)
+            indices = indices.to_numpy()[start_pos:end_pos]
 
         session = self.rec_sys_data.session_df.loc[
             indices
