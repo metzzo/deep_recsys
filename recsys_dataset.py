@@ -1,6 +1,6 @@
 from collections import namedtuple
 from functools import partial
-from random import randint, shuffle
+from random import randint, shuffle, random
 
 from torch.utils.data.dataset import Dataset
 
@@ -141,7 +141,7 @@ def load_sessions(item_df):
         raw_df = pd.read_csv(
             train_data_path,
             sep=',',
-            nrows=1000 if DEBUG else 100000 #TODO: change back to None for full dataset
+            nrows=1000 if DEBUG else 10000 #TODO: change back to None for full dataset
         )
         raw_df = split_row(raw_df, column='city', sep=',')
 
@@ -308,6 +308,9 @@ class RecSysDataset(Dataset):
             start_pos = randint(0, len(indices) - 3)
             end_pos = randint(start_pos + 2, len(indices) - 1)
             indices = indices.to_numpy()[start_pos:end_pos]
+
+        if self.train_mode and random() > 0.5:
+            indices = np.flip(indices)
 
         session = self.rec_sys_data.session_df.loc[
             indices

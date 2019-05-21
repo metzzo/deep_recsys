@@ -17,7 +17,9 @@ import numpy as np
 
 DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
-MODEL_PATH = os.path.join(DATA_PATH, 'model', datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S.model'))
+
+MODEL_NAME = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".model")
 DEBUG = False
 
 HIDDEN_DIM = 64
@@ -41,7 +43,7 @@ if __name__ == '__main__':
     print("Uses CUDA: {0}".format(use_cuda))
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    train_dataset = RecSysDataset(split=0.7, before=True, include_impressions=not ONLY_VALIDATE_VALIDATION, train_mode=True)
+    train_dataset = RecSysDataset(split=0.7, before=True, include_impressions=False, train_mode=True)
     val_dataset = RecSysDataset(split=0.7, before=False, include_impressions=True)
 
     network = LSTMNetwork(
@@ -160,3 +162,6 @@ if __name__ == '__main__':
                 print(phase, " Loss: ", losses.mean())
         if cur_patience > PATIENCE:
             break
+
+    print("Final best model: ", best_score_so_far)
+    os.rename(MODEL_PATH, '{}_{}.model'.format(MODEL_NAME, round(best_score_so_far, 2)))
