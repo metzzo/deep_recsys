@@ -67,7 +67,7 @@ def load_train_sessions(item_df):
         shared_output_file='shared.p',
         label_encoders=None,
         hot_encoders=None,
-        nrows=1000,  # TODO change
+        nrows=None #100000,  # TODO change
     )
 
 
@@ -84,7 +84,7 @@ def load_test_sessions(item_df):
         shared_output_file='shared.p',
         label_encoders=shared_data['label_encoders'],
         hot_encoders=shared_data['hot_encoders'],
-        nrows=1000,  # TODO change
+        nrows=None #100000,  # TODO change
     )
 
 
@@ -191,14 +191,15 @@ def base_load_sessions(
 
         print("groupby")
         grouped = raw_df.groupby(by='session_id')
-        print("extract session ids")
 
-        relevant_sessions = grouped[['step']].count()
-        train_session_ids = np.array(list(relevant_sessions[relevant_sessions['step'] > 1].index))
-        print("shuffle relevant session")
-        np.random.shuffle(train_session_ids)
+        print("shuffle & extract session ids")
+        session_sizes = grouped[['step']].count()
+        session_sizes = session_sizes[session_sizes['step'] > 1]
+        noise = np.random.normal(0, 2, [len(session_sizes), 1]).astype(int) # locally shuffle by sorting by "noised length"
+        noised_session_sizes = session_sizes + noise
+        noised_session_sizes.sort_values(by='step', inplace=True)
+        train_session_ids = np.array(list(noised_session_sizes.index))
 
-        print("shuffle session")
         print("write to disk")
 
         result = {

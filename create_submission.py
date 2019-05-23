@@ -4,6 +4,7 @@ import torch
 from verify_submission.verify_subm import main as verify_subm
 from torch.utils.data import DataLoader
 
+from dataset.recsys_dataset import RandomSampleStrategy
 from utility.helpers import get_string_timestamp
 
 MODEL_PATH = './data/model/2019_05_23_08_59_54.model'
@@ -36,8 +37,7 @@ def create_submission(path):
 
     dataset = RecSysDataset(
         rec_sys_data=test_rec_sys_data,
-        split=1.0,
-        before=True,
+        split_strategy=RandomSampleStrategy(split=1.0),
         include_impressions=True,
         train_mode=False
     )

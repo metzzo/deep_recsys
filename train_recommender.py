@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from create_submission import create_submission
 from recommender_configs import recommender_configs, prepare_config
 from network.recommender_network import RecommenderNetwork
-from dataset.recsys_dataset import RecSysDataset, RecSysData
+from dataset.recsys_dataset import RecSysDataset, RecSysData, RandomSampleStrategy, AllSamplesExceptStrategy
 
 import numpy as np
 
@@ -59,21 +59,18 @@ def train(config, state=None):
 
     train_dataset = RecSysDataset(
         rec_sys_data=get_rec_sys_data(),
-        split=0.7,
-        before=True,
+        split_strategy=RandomSampleStrategy(split=0.7),
         include_impressions=False,
         train_mode=True
     )
     train_val_dataset = RecSysDataset(
         rec_sys_data=get_rec_sys_data(),
-        split=0.7,
-        before=True,
+        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
         include_impressions=True
     )
     val_dataset = RecSysDataset(
         rec_sys_data=get_rec_sys_data(),
-        split=0.7,
-        before=False,
+        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
         include_impressions=True
     )
 
@@ -108,11 +105,11 @@ def train(config, state=None):
     }
 
     data_loaders = {
-        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0,
+        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
                             collate_fn=train_dataset.collator),
-        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=True, num_workers=0,
+        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
                                 collate_fn=train_val_dataset.collator),
-        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=0,
+        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
                           collate_fn=val_dataset.collator),
     }
 

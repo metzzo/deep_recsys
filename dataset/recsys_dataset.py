@@ -99,8 +99,32 @@ class RecSysData(object):
         self.groups = self.grouped.groups
 
 
+class SplitStrategy(object):
+    def sample(self, array):
+        raise NotImplementedError()
+
+
+class RandomSampleStrategy(SplitStrategy):
+    def __init__(self, split):
+        self.split = split
+
+    def sample(self, array):
+        samples_drawn = int(len(array) * self.split)
+        import random
+        indices = sorted(random.sample(range(len(array)), samples_drawn))
+        return array[indices]
+
+
+class AllSamplesExceptStrategy(SplitStrategy):
+    def __init__(self, exclude):
+        self.exclude = set(exclude)
+
+    def sample(self, array):
+        return np.array([x for x in array if x not in set(self.exclude)])
+
+
 class RecSysDataset(Dataset):
-    def __init__(self, rec_sys_data, split, before, include_impressions, train_mode=False):
+    def __init__(self, rec_sys_data, split_strategy, include_impressions, train_mode=False):
         self.rec_sys_data = rec_sys_data
         self.include_impressions = include_impressions
         item_feature_size = len(self.rec_sys_data.item_vectorizer.get_feature_names())
@@ -110,13 +134,8 @@ class RecSysDataset(Dataset):
         self.target_item_size = item_feature_size
         self.train_mode = train_mode
 
-        # TODO: neural network does not support sessions with length 1
-        sid = self.rec_sys_data.relevant_session_ids # if not train_mode else self.rec_sys_data.train_session_ids
-        split_index = int(len(sid) * split)
-        if before:
-            self.session_ids = sid[:split_index]
-        else:
-            self.session_ids = sid[split_index:]
+        sid = self.rec_sys_data.relevant_session_ids
+        self.session_ids = split_strategy.sample(array=sid)
 
         self.empty_array = np.array(0)
 

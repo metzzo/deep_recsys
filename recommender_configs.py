@@ -17,7 +17,7 @@ recommender_configs = [
         "name": "complex",
         "hidden_dim": 128,
         "patience": 6,
-        "batch_size": 128,
+        "batch_size": 64,
         "num_epochs": 25,
         "reduce_patience": 2,
         "num_gru_layers": 1,
@@ -41,7 +41,7 @@ def prepare_config(config):
         'reduce_factor': config.get('reduce_factor') or 0.1,
         'reduce_patience': config.get('reduce_patience') or 75,
         'weight_decay': config.get('weight_decay') or 0.00001,
-        'fc_layer_size': config.get('fc_layer_size') or 200,
+        'fc_layer_size': config.get('fc_layer_size') or 250,
         'num_gru_layers': config.get('num_gru_layers') or 1
     }
 
