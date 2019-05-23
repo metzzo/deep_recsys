@@ -1,13 +1,12 @@
 import os
 
-import baseline_algorithm.functions as f
-import score_submission
 import torch
-import verify_submission
+from verify_submission.verify_subm import main as verify_subm
 from torch.utils.data import DataLoader
 
+from utility.helpers import get_string_timestamp
 
-MODEL_PATH = 'TODO'
+MODEL_PATH = './data/model/2019_05_23_08_59_54.model'
 SUBMISSION_BATCH_SIZE = 1024
 
 import pandas as pd
@@ -24,7 +23,7 @@ def create_submission(path):
     from network.recommender_network import RecommenderNetwork
     from recommender_configs import prepare_config
     from utility.prediction import Prediction
-    from train_recommender import DATA_PATH, get_rec_sys_data
+    from train_recommender import DATA_PATH
 
     print("Create Submission File for: ", path)
 
@@ -32,13 +31,6 @@ def create_submission(path):
 
     config = prepare_config(state.get('config'))
     network_state_dict = state.get('network_state_dict') or state
-
-    train_rec_sys_data = get_rec_sys_data()
-    trained_session_ids = pd.DataFrame(
-        train_rec_sys_data.session_label_encoders['session_id'].inverse_transform(
-            train_rec_sys_data.session_df['session_id'].values
-        ), columns=['session_id']
-    )
 
     test_rec_sys_data = RecSysData(mode='test')
 
@@ -90,12 +82,35 @@ def create_submission(path):
         )
 
     # TODO: merge missing with baseline
-    df_out = cur_prediction.predictions
-    #df_out = get_baseline()
-    #print(df_out)
-    submission_path = os.path.join(DATA_PATH, 'submissions', 'submission.csv')  # TODO: add timestamp
+    sess_ids = test_rec_sys_data.relevant_session_ids
+
+
+    session_encoder = test_rec_sys_data.session_label_encoders['session_id']
+    predictions = cur_prediction.predictions
+    baseline = get_baseline()
+    tested_session_ids = pd.DataFrame(
+        session_encoder.inverse_transform(
+            sess_ids
+        ), columns=['session_id']
+    )
+    predictions['session_id'] = pd.Series(
+        session_encoder.inverse_transform(
+            predictions['session_id'].astype(int).values
+        )
+    )
+
+    not_in_common = baseline[(~baseline['session_id'].isin(tested_session_ids['session_id']))]
+    df_out = pd.concat([predictions, not_in_common], ignore_index=True)
+    submission_path = os.path.join(DATA_PATH, 'submissions', '{}.csv'.format(get_string_timestamp()))  # TODO: add timestamp
     df_out.to_csv(submission_path, index=False)
 
+    print("Do submission")
+
+    verify_subm.callback(
+        data_path='/',
+        submission_file=os.path.abspath(submission_path),
+        test_file=os.path.join(os.path.abspath(DATA_PATH), 'raw/test.csv')
+    )
 
 if __name__ == '__main__':
     create_submission(MODEL_PATH)

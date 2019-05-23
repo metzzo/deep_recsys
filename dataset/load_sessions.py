@@ -67,7 +67,7 @@ def load_train_sessions(item_df):
         shared_output_file='shared.p',
         label_encoders=None,
         hot_encoders=None,
-        nrows=None,  # TODO change
+        nrows=1000,  # TODO change
     )
 
 
@@ -84,8 +84,18 @@ def load_test_sessions(item_df):
         shared_output_file='shared.p',
         label_encoders=shared_data['label_encoders'],
         hot_encoders=shared_data['hot_encoders'],
-        nrows=None,  # TODO change
+        nrows=1000,  # TODO change
     )
+
+
+def get_referencing_action_types(is_test):
+    return [
+        'interaction item rating',
+        'interaction item info',
+        'interaction item image',
+        'interaction item deals',
+        'search for item',
+    ] + ([] if is_test else ['clickout item'])
 
 
 def base_load_sessions(
@@ -102,6 +112,8 @@ def base_load_sessions(
 
     pickle_path = os.path.join(DATA_PATH, output_file)
     shared_pickle_path = os.path.join(DATA_PATH, shared_output_file)
+
+    is_test = secondary_csv_file is None
 
     if os.path.exists(pickle_path):
         result = pickle.load(open(pickle_path, "rb"))
@@ -154,14 +166,9 @@ def base_load_sessions(
         clickout_type = label_encoders['action_type'].transform(['clickout item'])[0]
         print("filter references which do not exist")
 
-        referencing_action_type = label_encoders['action_type'].transform([
-            'clickout item',
-            'interaction item rating',
-            'interaction item info',
-            'interaction item image',
-            'interaction item deals',
-            'search for item',
-        ])
+        referencing_action_type = label_encoders[
+            'action_type'
+        ].transform(get_referencing_action_types(is_test))
         item_properties = item_df.loc[raw_df['reference']]
         item_properties.reset_index(inplace=True, drop=True)
         raw_df = raw_df[~((item_properties[0].isnull()) & (raw_df['action_type'].isin(referencing_action_type)))]

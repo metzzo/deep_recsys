@@ -2,7 +2,7 @@ import pandas as pd
 import torch.nn.functional as F
 import torch
 
-from utility.functions import score_submissions, get_reciprocal_ranks, SUBM_INDICES
+from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 
 
 class Prediction(object):

@@ -10,7 +10,7 @@ import torch
 
 from dataset.load_items import load_items
 from dataset.load_sessions import load_train_sessions, load_test_sessions
-from utility.functions import SUBM_INDICES
+from utility.score import SUBM_INDICES
 
 from warnings import simplefilter
 # ignore all future warnings

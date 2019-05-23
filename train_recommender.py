@@ -1,4 +1,3 @@
-import datetime
 import os
 import random
 import shutil
@@ -14,18 +13,17 @@ from recommender_configs import recommender_configs, prepare_config
 from network.recommender_network import RecommenderNetwork
 from dataset.recsys_dataset import RecSysDataset, RecSysData
 
-import torch.nn.functional as F
-import pandas as pd
 import numpy as np
 
+from utility.helpers import get_string_timestamp
 from utility.prediction import Prediction
 
 DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
 
-MODEL_NAME = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+MODEL_NAME = get_string_timestamp()
 MODEL_BASE_PATH = os.path.join(DATA_PATH, 'model')
-MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".model")
+MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".pth")
 
 
 DEBUG = False
@@ -132,7 +130,12 @@ def train(config, state=None):
     print("Uses CUDA: {0}".format(use_cuda))
     for epoch in range(start_epoch, num_epochs):
         print('-' * 15, "Epoch: ", epoch + 1, '\t', '-' * 15)
-        for phase in phases:  # 'train_val',
+
+        cur_phase = phases
+        if epoch == num_epochs - 1:
+            cur_phase = ['train', 'train_val', 'val']  # for last epoch do also train_val to find out if there was overfitting
+
+        for phase in cur_phase:  # 'train_val',
             cur_dataset = datasets[phase]
             cur_prediction = Prediction(
                 dataset=cur_dataset,
@@ -207,8 +210,8 @@ def train(config, state=None):
     print("Final best model: ", best_score_so_far)
     target_path = os.path.join(
             MODEL_BASE_PATH,
-            '{}_{}.model'.format(MODEL_NAME, round(best_score_so_far, 2))
-        )
+            '{}_{}.pth'.format(MODEL_NAME, round(best_score_so_far, 2))
+    )
     shutil.move(
         MODEL_PATH,
         target_path

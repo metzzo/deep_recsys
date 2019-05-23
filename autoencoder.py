@@ -9,7 +9,7 @@ from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from utility.functions import score_submissions, get_reciprocal_ranks, SUBM_INDICES
+from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 from network import LSTMNetwork
 from dataset.recsys_dataset import RecSysDataset
 
