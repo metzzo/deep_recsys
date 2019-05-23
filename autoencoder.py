@@ -9,9 +9,9 @@ from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from functions import score_submissions, get_reciprocal_ranks, SUBM_INDICES
+from utility.functions import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 from network import LSTMNetwork
-from recsys_dataset import RecSysDataset
+from dataset.recsys_dataset import RecSysDataset
 
 import torch.nn.functional as F
 import pandas as pd
@@ -21,13 +21,11 @@ DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
 
 MODEL_NAME = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-MODEL_BASE_PATH = os.path.join(DATA_PATH, 'model')
-MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".model")
+MODEL_BASE_PATH = os.path.join(DATA_PATH, 'ae_model')
+MODEL_PATH = os.path.join(DATA_PATH, 'ae_model', MODEL_NAME + ".model")
 DEBUG = False
 
 HIDDEN_DIM = 128
-
-NUM_WORKERS = 0 if DEBUG else 0
 
 PATIENCE = 100
 
@@ -86,7 +84,7 @@ if __name__ == '__main__':
     cur_patience = 0
     for epoch in range(NUM_EPOCHS):
         print('-'*15, "Epoch: ", epoch + 1, '\t', '-'*15)
-        for phase in ['train', 'train_val', 'val']:
+        for phase in ['train',  'val']: # 'train_val',
             cur_dataset = datasets[phase]
             cur_predictions = pd.DataFrame.from_dict({
                 'user_id': [''] * len(cur_dataset),
