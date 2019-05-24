@@ -183,7 +183,21 @@ class RecSysDataset(Dataset):
             item_impressions_df = pd.DataFrame(map(int, last_impressions.split('|')), columns=['impression'])
 
             item_impressions_id = np.array(item_impressions_df['impression'])
-            item_impressions = np.array(self.rec_sys_data.item_df.loc[item_impressions_id])
+            item_impressions = None
+
+            create_impression = False
+            try:
+                item_impressions = np.array(self.rec_sys_data.item_df.loc[item_impressions_id])
+            except KeyError:
+                create_impression = True
+
+            if create_impression or len(item_impressions) == 0:
+                print("Create impressions ", self.session_ids[index], session['user_id'])
+                # TODO: do something more clever, e.g.: by sorting by popularity
+                items = self.rec_sys_data.item_df.sample(25)
+                item_impressions_id = items.index.values
+                item_impressions = np.array(items)
+
             result += [item_impressions, item_impressions_id]
             simple_result += [last_row[SUBM_INDICES]]
 
