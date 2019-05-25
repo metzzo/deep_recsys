@@ -1,25 +1,39 @@
+import torch
 import torch.nn as nn
 
 
 class RankNetNetwork(nn.Module):
-    def __init__(self, config, target_item_size):
+    def __init__(self, config, item_feature_size):
         super(RankNetNetwork, self).__init__()
-        self.target_item_size = target_item_size
+        self.item_feature_size = item_feature_size
+
+        self.prepare = nn.Sequential(
+            nn.Linear(item_feature_size, 128),
+            nn.ReLU(),
+            nn.BatchNorm1d(128),
+            nn.Linear(128, 64),
+        )
 
         self.model = nn.Sequential(
-            nn.Linear(target_item_size, 128),
+            nn.Linear(64 * 2, 64),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
+            nn.BatchNorm1d(64),
             nn.Linear(64, 32),
             nn.ReLU(),
+            nn.BatchNorm1d(32),
             nn.Linear(32, 1),
         )
 
-        self.sigmoid = nn.Sigmoid()
+        self.output_sig = nn.Sigmoid()
 
     def forward(self, input_1, input_2):
-        s1 = self.model(input_1)
-        s2 = self.model(input_2)
+        input_1 = self.prepare(input_1)
+        input_2 = self.prepare(input_2)
 
-        return self.output_sig(s1 - s2)
+        cat = torch.cat((input_1, input_2), 1)
+
+        return self.model(cat)
+
+    def predict(self, input):
+        input = self.prepare(input)
+        return self.output_sig(self.model(input))

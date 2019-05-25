@@ -5,17 +5,21 @@ import shutil
 import numpy as np
 import progressbar
 import torch
+from sklearn.metrics import f1_score
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from create_submission import create_submission
 from dataset.ranknet_dataset import RankNetDataset, RankNetData
-from dataset.recsys_dataset import RecSysDataset, AllSamplesExceptStrategy
+from dataset.recsys_dataset import RecSysDataset
+from utility.split_utility import AllSamplesExceptStrategy, RandomSampleStrategy, AllSamplesIncludeStrategy
+from network.ranknet_network import RankNetNetwork
 from network.recommender_network import RecommenderNetwork
 from ranking_configs import ranking_configs, prepare_config
 from utility.helpers import get_string_timestamp
-from utility.prediction import Prediction
+import pandas as pd
 
 DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
@@ -58,38 +62,29 @@ def train(config, state=None):
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     train_dataset = RankNetDataset(
-        data=get_rank_net_data()
+        data=get_rank_net_data(),
+        split_strategy=RandomSampleStrategy(split=0.7),
+    )
+    train_val_dataset = RankNetDataset(
+        data=get_rank_net_data(),
+        split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ranking_indices),
+    )
+    val_dataset = RankNetDataset(
+        data=get_rank_net_data(),
+        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ranking_indices),
     )
 
-    raise NotImplementedError()
-    train_val_dataset = RecSysDataset(
-        rec_sys_data=get_rec_sys_data(),
-        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
-        include_impressions=True
-    )
-    val_dataset = RecSysDataset(
-        rec_sys_data=get_rec_sys_data(),
-        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
-        include_impressions=True
-    )
-
-    if 'config_constraint' in config:
-        max_dataset_size = config['config_constraint']['max_dataset_size']
-        if len(train_dataset) + len(val_dataset) > max_dataset_size:
-            print("Skip config, constraints not satisfied")
-            return 0, ''
-
-    network = RecommenderNetwork(
+    network = RankNetNetwork(
         config=config,
-        item_size=train_dataset.item_size,
-        target_item_size=train_dataset.target_item_size,
+        item_feature_size=train_dataset.item_feature_size,
     )
-    loss_function = nn.MSELoss()
+    loss_function = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
     lr_scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
 
     start_epoch = 0
     best_score_so_far = None
+    best_baseline_so_far = None
 
     if state:
         optimizer.load_state_dict(state['optimizer_state_dict'])
@@ -104,12 +99,9 @@ def train(config, state=None):
     }
 
     data_loaders = {
-        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                            collate_fn=train_dataset.collator),
-        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                                collate_fn=train_val_dataset.collator),
-        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                          collate_fn=val_dataset.collator),
+        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0),
+        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=0),
+        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0),
     }
 
     sizes = {
@@ -131,12 +123,16 @@ def train(config, state=None):
         if epoch == num_epochs - 1:
             cur_phase = ['train', 'train_val', 'val']  # for last epoch do also train_val to find out if there was overfitting
 
-        for phase in cur_phase:  # 'train_val',
+        for phase in cur_phase:
             cur_dataset = datasets[phase]
-            cur_prediction = Prediction(
-                dataset=cur_dataset,
-                device=device,
-            )
+
+            dict_data = {
+                "predicted": [0] * len(cur_dataset),
+                "target": [0] * len(cur_dataset),
+                "baseline": [0] * len(cur_dataset),
+            }
+            cur_prediction = pd.DataFrame.from_dict(dict_data)
+            prediction_ptr = 0
             if phase == 'train':
                 network.train()
             else:
@@ -146,44 +142,61 @@ def train(config, state=None):
             losses.fill(0)
             with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
                 for idx, data in enumerate(data_loaders[phase]):
-                    if do_validation:
-                        sessions, session_lengths, session_targets, item_impressions, impression_ids, ids = data
-                    else:
-                        sessions, session_lengths, session_targets = data
-                        impression_ids = None
-                        item_impressions = None
-                        ids = None
+                    item1, item2, target = data
 
-                    sessions = sessions.to(device)
-                    session_targets = session_targets.to(device)
+                    item1 = item1.to(device)
+                    item2 = item2.to(device)
+                    target = target.to(device)
 
                     optimizer.zero_grad()
 
                     with torch.set_grad_enabled(phase == 'train'):
-                        item_scores = network(sessions, session_lengths).float()
+                        predicted = network(
+                            input_1=item1,
+                            input_2=item2,
+                        ).float()
 
                         if phase == 'train':
-                            loss = loss_function(item_scores, session_targets)
+                            loss = loss_function(predicted, target)
                             loss.backward()
                             optimizer.step()
                             losses[idx] = loss.item()
 
                     if do_validation:
-                        cur_prediction.add_predictions(
-                            ids=ids,
-                            impression_ids=impression_ids,
-                            item_impressions=item_impressions,
-                            item_scores=item_scores
-                        )
+                        predicted = F.sigmoid(predicted)
+
+                        predicted = predicted \
+                            .detach().cpu().numpy().flatten()
+                        target = target \
+                            .detach().cpu().numpy().flatten()
+
+                        cur_prediction['predicted'][prediction_ptr: prediction_ptr + len(predicted)] = predicted
+                        cur_prediction['target'][prediction_ptr: prediction_ptr + len(target)] = target
+                        cur_prediction['baseline'][prediction_ptr: prediction_ptr + len(target)] = F.cosine_similarity(
+                            item1,
+                            item2
+                        ).cpu().numpy()
+
+                        prediction_ptr += len(target)
                     bar.update(idx)
             if do_validation:
-                score = cur_prediction.get_score()
+                score = f1_score(
+                    cur_prediction['predicted'].values > 0.5,
+                    cur_prediction['target'].values
+                )
 
-                print(phase, " Score: ", score)
+                baseline_pred = ((1 + cur_prediction['baseline'].values)/2) > 0.5
+                baseline = f1_score(
+                    baseline_pred > 0.5,
+                    cur_prediction['target'].values
+                )
+
+                print(phase, " Score: ", score, "Baseline:", baseline)
                 lr_scheduler.step(score)
                 if phase == 'val':
                     if best_score_so_far is None or score > best_score_so_far:
                         best_score_so_far = score
+                        best_baseline_so_far = baseline
                         torch.save({
                             'epoch': epoch,
                             'best_score_so_far': best_score_so_far,
@@ -213,7 +226,7 @@ def train(config, state=None):
         target_path
     )
 
-    return best_score_so_far, target_path
+    return best_score_so_far, best_baseline_so_far, target_path
 
 
 if __name__ == '__main__':
@@ -221,20 +234,19 @@ if __name__ == '__main__':
     best_score_so_far = 0
     best_config = None
     best_path = None
+    best_baseline_so_far = 0
     for config in ranking_configs:
         print("Train config ", config['name'])
-        current_score, current_path = train(config)
+        current_score, current_baseline, current_path = train(config)
         if current_score > best_score_so_far:
             best_score_so_far = current_score
+            best_baseline_so_far = current_baseline
             best_config = config
             best_path = current_path
 
     print("-" * 30)
     print("Best Config: ", str(best_config))
     print("Best Score: ", str(best_score_so_far))
+    print("Best Baseline: ", str(best_baseline_so_far))
     print("Best Path: ", str(best_path))
-
-    create_submission(
-        path=best_path
-    )
 

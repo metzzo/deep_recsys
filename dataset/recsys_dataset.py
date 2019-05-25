@@ -14,6 +14,7 @@ from utility.score import SUBM_INDICES
 
 from warnings import simplefilter
 # ignore all future warnings
+
 simplefilter(action='ignore', category=FutureWarning)
 
 RecSysSampleWithImpressions = namedtuple('RecSysSampleWithImpressions', [
@@ -97,30 +98,6 @@ class RecSysData(object):
         self.session_label_encoders = session_data['label_encoders']
 
         self.groups = self.grouped.groups
-
-
-class SplitStrategy(object):
-    def sample(self, array):
-        raise NotImplementedError()
-
-
-class RandomSampleStrategy(SplitStrategy):
-    def __init__(self, split):
-        self.split = split
-
-    def sample(self, array):
-        samples_drawn = int(len(array) * self.split)
-        import random
-        indices = sorted(random.sample(range(len(array)), samples_drawn))
-        return array[indices]
-
-
-class AllSamplesExceptStrategy(SplitStrategy):
-    def __init__(self, exclude):
-        self.exclude = set(exclude)
-
-    def sample(self, array):
-        return np.array([x for x in array if x not in set(self.exclude)])
 
 
 class RecSysDataset(Dataset):

@@ -17,12 +17,13 @@ ranking_configs = [
         "name": "complex",
         "hidden_dim": 128,
         "patience": 6,
-        "batch_size": 64,
+        "batch_size": 256,
         "num_epochs": 25,
         "reduce_patience": 2,
         "num_gru_layers": 1,
         "fc_layer_size": 200,
-        "phases": ['train', 'val']
+        "learning_rate": 0.01,
+        "phases": ['train', 'val'] #  'train_val',
     },
 ]
 

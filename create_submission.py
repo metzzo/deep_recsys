@@ -6,8 +6,9 @@ import torch
 from torch.utils.data import DataLoader
 from verify_submission.verify_subm import main as verify_subm
 
-from dataset.recsys_dataset import RandomSampleStrategy
+from utility.split_utility import RandomSampleStrategy
 from utility.helpers import get_string_timestamp
+import pandas as pd
 
 MODEL_PATH = './data/model/2019_05_23_22_09_43_0.58_full.pth'
 SUBMISSION_BATCH_SIZE = 512
@@ -15,13 +16,14 @@ SUBMISSION_BATCH_SIZE = 512
 # these are missing in submission popular for some reason
 MISSING_IN_POPULAR = ["f4e7686de96f6", "28aed6ff4f5cf", "1dc624176b25a", "3146144dd180c", "6395e6166436d", "5fd68f0c5a86f", "0c558de5076d3", "be040dde80c92", "692367c2a1e0e", "2fea505733796", "9f73d9d10c1e3", "f3fcfa14e3c1b", "51d1160090a5e", "9b38c0d8c7736", "f761e020a59f6", "a22b00a80121c", "a9641c5908155", "76b4000458cba", "c18c1f77a080b", "4df3c262efcf1", "2555579f7370b", "dd8438cfdd337", "3a4e144c181a5", "1e65b48e85ac6", "16cb478a81ef9", "263608e619c16", "095a051b27180", "e1f2b85aa8440", "ff30a418d7821"]
 
-import pandas as pd
-
+MODE = 'test'
+MERGE_WITH_REST = False
 
 def get_baseline():
     from train_recommender import RAW_DATA_PATH
 
     return pd.read_csv(os.path.join(RAW_DATA_PATH, 'submission_popular.csv'))
+
 
 def do_prediction(state, dataset, add_reference):
     from network.recommender_network import RecommenderNetwork
@@ -85,7 +87,7 @@ def create_submission(path):
 
     state = torch.load(path)
 
-    test_rec_sys_data = RecSysData(mode='test')
+    test_rec_sys_data = RecSysData(mode=MODE)
 
     dataset = RecSysDataset(
         rec_sys_data=test_rec_sys_data,
@@ -96,29 +98,34 @@ def create_submission(path):
 
     cur_prediction = do_prediction(state, dataset, add_reference=False)
     pickle.dump(cur_prediction, open(os.path.join(DATA_PATH, 'prediction_dump.pickle'), "wb"), protocol=4)
+    submission_path = os.path.join(DATA_PATH, 'submissions', '{}.csv'.format(get_string_timestamp()))
 
     session_encoder = test_rec_sys_data.session_label_encoders['session_id']
     predictions = cur_prediction.predictions
-    baseline = get_baseline()
+
     predictions['session_id'] = pd.Series(
         session_encoder.inverse_transform(
             predictions['session_id'].astype(int).values
         )
     )
-    predictions = predictions[~predictions['session_id'].isin(MISSING_IN_POPULAR)]
 
-    not_in_common = baseline[~baseline['session_id'].isin(predictions['session_id'])]
-    df_out = pd.concat([predictions, not_in_common], ignore_index=True)
-    submission_path = os.path.join(DATA_PATH, 'submissions', '{}.csv'.format(get_string_timestamp()))
-    df_out.to_csv(submission_path, index=False)
+    if MERGE_WITH_REST:
+        baseline = get_baseline()
+        predictions = predictions[~predictions['session_id'].isin(MISSING_IN_POPULAR)]
 
-    print("Do submission")
+        not_in_common = baseline[~baseline['session_id'].isin(predictions['session_id'])]
+        df_out = pd.concat([predictions, not_in_common], ignore_index=True)
+        df_out.to_csv(submission_path, index=False)
 
-    verify_subm.callback(
-        data_path='/',
-        submission_file=os.path.abspath(submission_path),
-        test_file=os.path.join(os.path.abspath(DATA_PATH), 'raw/test.csv')
-    )
+        print("Do submission")
+
+        verify_subm.callback(
+            data_path='/',
+            submission_file=os.path.abspath(submission_path),
+            test_file=os.path.join(os.path.abspath(DATA_PATH), 'raw/test.csv')
+        )
+    else:
+        predictions.to_csv(submission_path, index=False)
 
 if __name__ == '__main__':
     create_submission(MODEL_PATH)

@@ -11,7 +11,8 @@ from torch.utils.data import DataLoader
 from create_submission import create_submission
 from recommender_configs import recommender_configs, prepare_config
 from network.recommender_network import RecommenderNetwork
-from dataset.recsys_dataset import RecSysDataset, RecSysData, RandomSampleStrategy, AllSamplesExceptStrategy
+from dataset.recsys_dataset import RecSysDataset, RecSysData
+from utility.split_utility import RandomSampleStrategy, AllSamplesExceptStrategy, AllSamplesIncludeStrategy
 
 import numpy as np
 
@@ -65,7 +66,7 @@ def train(config, state=None):
     )
     train_val_dataset = RecSysDataset(
         rec_sys_data=get_rec_sys_data(),
-        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
+        split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ids),
         include_impressions=True
     )
     val_dataset = RecSysDataset(

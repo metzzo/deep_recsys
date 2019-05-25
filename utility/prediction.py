@@ -48,7 +48,9 @@ class Prediction(object):
                 cur_pred.at['timestamp'] = id['timestamp']
                 cur_pred.at['step'] = id['step']
                 if self.add_reference:
-                    cur_pred.at['reference'] = id['reference']
+                    cur_pred.at['reference'] = self.dataset.rec_sys_data.session_df.loc[
+                        self.dataset.rec_sys_data.groups[id['session_id']]
+                    ]['reference'].iloc[-1]
                 self.prediction_ptr += 1
             except:
                 print("Error", impression_id.detach().cpu().numpy(), item_impression.detach().cpu().numpy())
