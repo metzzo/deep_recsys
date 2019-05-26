@@ -29,6 +29,8 @@ MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".pth")
 
 DEBUG = False
 
+DO_SUBMISSION = False
+
 rec_sys_data = None
 
 
@@ -138,6 +140,7 @@ def train(config, state=None):
             cur_prediction = Prediction(
                 dataset=cur_dataset,
                 device=device,
+                add_reference=False
             )
             if phase == 'train':
                 network.train()
@@ -234,8 +237,8 @@ if __name__ == '__main__':
     print("Best Config: ", str(best_config))
     print("Best Score: ", str(best_score_so_far))
     print("Best Path: ", str(best_path))
-
-    create_submission(
-        path=best_path
-    )
+    if DO_SUBMISSION:
+        create_submission(
+            path=best_path
+        )
 

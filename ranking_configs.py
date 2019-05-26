@@ -23,6 +23,7 @@ ranking_configs = [
         "num_gru_layers": 1,
         "fc_layer_size": 200,
         "learning_rate": 0.01,
+        "dataset_size": 100000,
         "phases": ['train', 'val'] #  'train_val',
     },
 ]
@@ -43,6 +44,7 @@ def prepare_config(config):
         'reduce_patience': config.get('reduce_patience') or 75,
         'weight_decay': config.get('weight_decay') or 0.00001,
         'fc_layer_size': config.get('fc_layer_size') or 250,
-        'num_gru_layers': config.get('num_gru_layers') or 1
+        'num_gru_layers': config.get('num_gru_layers') or 1,
+        'dataset_size': config.get('dataset_size')
     }
 

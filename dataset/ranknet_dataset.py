@@ -14,12 +14,13 @@ import pandas as pd
 import numpy as np
 
 
-def get_ranknet_data(model_path, session_data):
+def get_ranknet_data(name, size, session_data):
     from train_recommender import DATA_PATH
 
-    file = os.path.basename(model_path)
+    if size is not None:
+        name = '{}_{}'.format(name, size)
 
-    pickle_path = os.path.join(DATA_PATH, 'rank_data', file)
+    pickle_path = os.path.join(DATA_PATH, 'rank_data', name)
     shared_pickle_path = os.path.join(DATA_PATH, 'shared.p')
     shared = pickle.load(open(shared_pickle_path, "rb"))
 
@@ -42,7 +43,7 @@ def get_ranknet_data(model_path, session_data):
         raw_df = pd.read_csv(
             os.path.join(RAW_DATA_PATH, 'train.csv'),
             sep=',',
-           # nrows=1000
+            nrows=size
         )
         raw_df = raw_df[raw_df['action_type'] == 'clickout item']
         raw_df = raw_df[['session_id',  'reference', 'impressions']]
@@ -68,11 +69,12 @@ def get_ranknet_data(model_path, session_data):
 
 
 class RankNetData(object):
-    def __init__(self, model_path):
+    def __init__(self, name, size):
         #self.session_data = get_rec_sys_data()
         self.session_rankings_df = get_ranknet_data(
-            model_path=model_path,
-            session_data=None #self.session_data,
+            name=name,
+            session_data=None, #self.session_data,
+            size=size,
         )
         self.item_df, self.item_vectorizer = load_items()
 

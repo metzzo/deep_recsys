@@ -3,23 +3,20 @@ import random
 import shutil
 
 import numpy as np
+import pandas as pd
 import progressbar
 import torch
+import torch.nn.functional as F
 from sklearn.metrics import f1_score
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
-import torch.nn.functional as F
 
-from create_submission import create_submission
 from dataset.ranknet_dataset import RankNetDataset, RankNetData
-from dataset.recsys_dataset import RecSysDataset
-from utility.split_utility import AllSamplesExceptStrategy, RandomSampleStrategy, AllSamplesIncludeStrategy
 from network.ranknet_network import RankNetNetwork
-from network.recommender_network import RecommenderNetwork
 from ranking_configs import ranking_configs, prepare_config
 from utility.helpers import get_string_timestamp
-import pandas as pd
+from utility.split_utility import AllSamplesExceptStrategy, RandomSampleStrategy, AllSamplesIncludeStrategy
 
 DATA_PATH = './data/'
 RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
@@ -28,17 +25,33 @@ MODEL_NAME = get_string_timestamp()
 MODEL_BASE_PATH = os.path.join(DATA_PATH, 'ranking_model')
 MODEL_PATH = os.path.join(DATA_PATH, 'ranking_model', MODEL_NAME + ".pth")
 
-RECOMMENDER_MODEL = os.path.join(DATA_PATH, 'model', '2019_05_23_22_09_43_0.58_full.pth')
-
 rank_net_data = None
 
 
-def get_rank_net_data():
+def load_ranknet_network(path, device):
+    state = torch.load(path)
+
+    config = prepare_config(state.get('config'))
+    network_state_dict = state.get('network_state_dict') or state
+
+    network = RankNetNetwork(
+        config=config,
+        device=device,
+        item_feature_size=202  # TODO do not hardcode
+    )
+    network.load_state_dict(network_state_dict)
+    network.eval()
+
+    return network
+
+
+def get_rank_net_data(dataset_size):
     global rank_net_data
 
     if rank_net_data is None:
         rank_net_data = RankNetData(
-            model_path=RECOMMENDER_MODEL
+            name='rank_data.p',
+            size=dataset_size,
         )
 
     return rank_net_data
@@ -61,22 +74,25 @@ def train(config, state=None):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
+    rank_net_data = get_rank_net_data(dataset_size=config.get('dataset_size'))
+
     train_dataset = RankNetDataset(
-        data=get_rank_net_data(),
+        data=rank_net_data,
         split_strategy=RandomSampleStrategy(split=0.7),
     )
     train_val_dataset = RankNetDataset(
-        data=get_rank_net_data(),
+        data=rank_net_data,
         split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ranking_indices),
     )
     val_dataset = RankNetDataset(
-        data=get_rank_net_data(),
+        data=rank_net_data,
         split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ranking_indices),
     )
 
     network = RankNetNetwork(
         config=config,
         item_feature_size=train_dataset.item_feature_size,
+        device=device
     )
     loss_function = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(network.parameters(), lr=learning_rate, weight_decay=weight_decay)

@@ -67,7 +67,7 @@ def load_train_sessions(item_df):
         shared_output_file='shared.p',
         label_encoders=None,
         hot_encoders=None,
-        nrows=10000 #100000,  # TODO change
+        nrows=100000 #100000,  # TODO change
     )
 
 

@@ -9,10 +9,6 @@
             "max_dataset_size": 500000
         }
     },
-
-"""
-
-recommender_configs = [
     {
         "name": "complex",
         "hidden_dim": 128,
@@ -20,6 +16,22 @@ recommender_configs = [
         "batch_size": 64,
         "num_epochs": 25,
         "reduce_patience": 2,
+        "num_gru_layers": 1,
+        "fc_layer_size": 200,
+        "phases": ['train', 'val']
+    },
+]
+
+"""
+
+recommender_configs = [
+    {
+        "name": "complex",
+        "hidden_dim": 128,
+        "patience": 100,
+        "batch_size": 64,
+        "num_epochs": 500,
+        "reduce_patience": 20,
         "num_gru_layers": 1,
         "fc_layer_size": 200,
         "phases": ['train', 'val']
