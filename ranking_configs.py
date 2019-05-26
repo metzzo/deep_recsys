@@ -45,6 +45,6 @@ def prepare_config(config):
         'weight_decay': config.get('weight_decay') or 0.00001,
         'fc_layer_size': config.get('fc_layer_size') or 250,
         'num_gru_layers': config.get('num_gru_layers') or 1,
-        'dataset_size': config.get('dataset_size')
+        'dataset_size': config.get('dataset_size') or None
     }
 

@@ -76,7 +76,7 @@ def collator_without_impressions(items, item_size):
 
 
 class RecSysData(object):
-    def __init__(self, mode):
+    def __init__(self, mode, size):
         self.item_df, self.item_vectorizer = load_items()
 
         if mode == 'train':
@@ -87,7 +87,8 @@ class RecSysData(object):
             raise NotImplementedError()
 
         session_data = load_func(
-            item_df=self.item_df
+            item_df=self.item_df,
+            size=size,
         )
 
         self.session_df = session_data['session']
@@ -164,7 +165,9 @@ class RecSysDataset(Dataset):
 
             create_impression = False
             try:
-                item_impressions = np.array(self.rec_sys_data.item_df.loc[item_impressions_id])
+                item_impressions = self.rec_sys_data.item_df.loc[item_impressions_id]
+                item_impressions.dropna(inplace=True)
+                item_impressions = np.array(item_impressions)
             except KeyError:
                 create_impression = True
 
@@ -174,6 +177,9 @@ class RecSysDataset(Dataset):
                 items = self.rec_sys_data.item_df.sample(25)
                 item_impressions_id = items.index.values
                 item_impressions = np.array(items)
+
+            if np.count_nonzero(np.isnan(item_impressions)) > 0:
+                print("swag")
 
             result += [item_impressions, item_impressions_id]
             simple_result += [last_row[SUBM_INDICES]]

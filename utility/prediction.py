@@ -29,6 +29,7 @@ class Prediction(object):
         self.add_reference = add_reference
 
         # load rank network
+        """
         from train_ranking import load_ranknet_network
         from train_ranking import DATA_PATH
 
@@ -41,16 +42,17 @@ class Prediction(object):
             )
             rank_net = rank_net.to(device)
         self.rank_net = rank_net
+        """
 
     def rank(self, predicted, impressions, impreession_ids):
         item_score_repeated = predicted.repeat(len(impressions), 1)
-        #sim = F.cosine_similarity(item_score_repeated, impressions)
-
+        sim = F.cosine_similarity(item_score_repeated, impressions)
+        """
         sim = self.rank_net.predict(
             input_1=item_score_repeated,
             input_2=impressions
         ).flatten()
-
+        """
         sorted = torch.argsort(sim, descending=True)
         sorted_impressions = ' '.join(
             torch.gather(impreession_ids, 0, sorted).cpu().numpy().astype(str))
