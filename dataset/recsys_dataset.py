@@ -101,6 +101,7 @@ class RecSysData(object):
         self.session_label_encoders = session_data['label_encoders']
 
         self.groups = self.grouped.groups
+        self.size = size
 
 
 class RecSysDataset(Dataset):

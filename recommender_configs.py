@@ -1,29 +1,3 @@
-"""
-    {
-        "name": "simple",
-        "hidden_dim": 128,
-        "patience": 100,
-        "batch_size": 128,
-        "num_epochs": 1, # 1000
-        "config_constraint": {
-            "max_dataset_size": 500000
-        }
-    },
-    {
-        "name": "complex",
-        "hidden_dim": 128,
-        "patience": 6,
-        "batch_size": 64,
-        "num_epochs": 25,
-        "reduce_patience": 2,
-        "num_gru_layers": 1,
-        "fc_layer_size": 200,
-        "phases": ['train', 'val']
-    },
-]
-
-"""
-
 recommender_configs = [
     {
         "name": "complex",
@@ -34,8 +8,9 @@ recommender_configs = [
         "reduce_patience": 20,
         "num_gru_layers": 1,
         "fc_layer_size": 200,
-        "phases": ['train', 'train_rank', 'val'], #  'train_val','train_val',
-        "dataset_size": None,
+        "phases": ['train',  'val'], #  'train_val','train_val', 'train_rank',
+        "use_cosine_similarity": True,
+        "dataset_size": 1000000,
     },
 ]
 
@@ -57,5 +32,6 @@ def prepare_config(config):
         'fc_layer_size': config.get('fc_layer_size') or 250,
         'num_gru_layers': config.get('num_gru_layers') or 1,
         'dataset_size': config.get('dataset_size'),
+        'use_cosine_similarity': config.get('use_cosine_similarity') or False
     }
 

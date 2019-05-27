@@ -38,6 +38,9 @@ rec_sys_data = None
 def get_rec_sys_data(size):
     global rec_sys_data
 
+    if rec_sys_data is not None and rec_sys_data.size != size:
+        rec_sys_data = None
+
     if rec_sys_data is None:
         rec_sys_data = RecSysData(mode='train', size=size)
 
@@ -57,6 +60,7 @@ def train(config, state=None):
     reduce_factor = config.get('reduce_factor')
     reduce_patience = config.get('reduce_patience')
     weight_decay = config.get('weight_decay')
+    use_cosine_similarity = config.get('use_cosine_similarity')
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -87,12 +91,6 @@ def train(config, state=None):
         split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
         include_impressions=True
     )
-
-    if 'config_constraint' in config:
-        max_dataset_size = config['config_constraint']['max_dataset_size']
-        if len(train_dataset) + len(val_dataset) > max_dataset_size:
-            print("Skip config, constraints not satisfied")
-            return 0, ''
 
     impression_rank_network = ImpressionRankNetwork(
         config=config,
@@ -161,15 +159,14 @@ def train(config, state=None):
         print('-' * 15, "Epoch: ", epoch + 1, '\t', '-' * 15)
 
         cur_phase = phases
-        if epoch == num_epochs - 1:
-            cur_phase = ['train', 'train_rank', 'train_val', 'val']  # for last epoch do also train_val to find out if there was overfitting
 
         for phase in cur_phase:  # 'train_val',
             cur_dataset = datasets[phase]
             cur_prediction = Prediction(
                 dataset=cur_dataset,
                 device=device,
-                add_reference=False
+                add_reference=False,
+                use_cosine_similarity=use_cosine_similarity,
             )
             do_validation = phase != 'train' and phase != 'train_rank'
             if phase == 'train':
@@ -207,6 +204,8 @@ def train(config, state=None):
                             rc_optimizer.step()
                             losses[idx] = loss.item()
                     elif phase == 'train_rank':
+                        if use_cosine_similarity:
+                            print("Weird settings train_rank vs cosine_similarity")
                         ir_optimizer.zero_grad()
                         item_scores = recommend_network(sessions, session_lengths).float()
 

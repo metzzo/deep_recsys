@@ -10,7 +10,7 @@ from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 rank_net = None
 
 class Prediction(object):
-    def __init__(self, dataset, device, add_reference=True):
+    def __init__(self, dataset, device, add_reference=True, use_cosine_similarity=False):
         super()
         self.dataset = dataset
         self.device = device
@@ -28,6 +28,7 @@ class Prediction(object):
 
         self.predictions = pd.DataFrame.from_dict(dict_data)
         self.add_reference = add_reference
+        self.use_cosine_similarity = use_cosine_similarity
 
         # load rank network
         """
@@ -46,23 +47,23 @@ class Prediction(object):
         """
 
     def rank(self, predicted, impressions, impreession_ids, selected_impression):
-        #item_score_repeated = predicted.repeat(len(impressions), 1)
-        #sim = F.cosine_similarity(item_score_repeated, impressions)
-        """
-        sim = self.rank_net.predict(
-            input_1=item_score_repeated,
-            input_2=impressions
-        ).flatten()
-        """
-        impreession_ids = impreession_ids.detach().cpu().numpy()
-        selected_impression = selected_impression.detach().cpu().numpy()[:len(impreession_ids)]
-        #sorted = torch.argsort(sim, descending=True)
-        sorted = np.argsort(-selected_impression)
-        sorted_impressions = ' '.join(
-            impreession_ids[sorted].astype(str))
+        if self.use_cosine_similarity:
+            item_score_repeated = predicted.repeat(len(impressions), 1)
+            sim = F.cosine_similarity(item_score_repeated, impressions)
+            sorted = torch.argsort(sim, descending=True)
+
+            sorted_impressions = ' '.join(
+                torch.gather(impreession_ids, 0, sorted).cpu().numpy().astype(str)
+            )
+        else:
+            impreession_ids = impreession_ids.detach().cpu().numpy()
+            selected_impression = selected_impression.detach().cpu().numpy()[:len(impreession_ids)]
+            sorted = np.argsort(-selected_impression)
+            sorted_impressions = ' '.join(
+                impreession_ids[sorted].astype(str)
+            )
 
         return sorted_impressions
-
 
     def add_predictions(self, ids, impression_ids, item_impressions, item_scores, selected_impression):
         item_scores = item_scores.to(self.device)
