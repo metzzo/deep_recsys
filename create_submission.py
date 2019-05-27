@@ -87,7 +87,7 @@ def create_submission(path):
 
     state = torch.load(path)
 
-    test_rec_sys_data = RecSysData(mode=MODE)
+    test_rec_sys_data = RecSysData(mode=MODE, size=None)
 
     dataset = RecSysDataset(
         rec_sys_data=test_rec_sys_data,

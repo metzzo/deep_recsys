@@ -63,7 +63,7 @@ def load_train_sessions(item_df, size):
         # needed to fit the encoders etc properly, this is okay, because the last reference wont have a reference anyway
         # so it will get filtered anyway
         secondary_csv_file='test.csv',
-        output_file='train_sessions_{}.p'.format(size),
+        output_file='train_sessions_{}.p'.format(size or 'full'),
         shared_output_file='shared.p',
         label_encoders=None,
         hot_encoders=None,
@@ -80,7 +80,7 @@ def load_test_sessions(item_df, size):
         item_df=item_df,
         csv_file='test.csv',
         secondary_csv_file=None,
-        output_file='test_sessions_{}.p'.format(size),
+        output_file='test_sessions_{}.p'.format(size or 'full'),
         shared_output_file='shared.p',
         label_encoders=shared_data['label_encoders'],
         hot_encoders=shared_data['hot_encoders'],

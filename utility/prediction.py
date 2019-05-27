@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import torch.nn.functional as F
 import torch
+import numpy as np
 
 from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 
@@ -44,29 +45,34 @@ class Prediction(object):
         self.rank_net = rank_net
         """
 
-    def rank(self, predicted, impressions, impreession_ids):
-        item_score_repeated = predicted.repeat(len(impressions), 1)
-        sim = F.cosine_similarity(item_score_repeated, impressions)
+    def rank(self, predicted, impressions, impreession_ids, selected_impression):
+        #item_score_repeated = predicted.repeat(len(impressions), 1)
+        #sim = F.cosine_similarity(item_score_repeated, impressions)
         """
         sim = self.rank_net.predict(
             input_1=item_score_repeated,
             input_2=impressions
         ).flatten()
         """
-        sorted = torch.argsort(sim, descending=True)
+        impreession_ids = impreession_ids.detach().cpu().numpy()
+        selected_impression = selected_impression.detach().cpu().numpy()[:len(impreession_ids)]
+        #sorted = torch.argsort(sim, descending=True)
+        sorted = np.argsort(-selected_impression)
         sorted_impressions = ' '.join(
-            torch.gather(impreession_ids, 0, sorted).cpu().numpy().astype(str))
+            impreession_ids[sorted].astype(str))
 
         return sorted_impressions
 
 
-    def add_predictions(self, ids, impression_ids, item_impressions, item_scores):
+    def add_predictions(self, ids, impression_ids, item_impressions, item_scores, selected_impression):
         item_scores = item_scores.to(self.device)
 
-        for id, impression_id, item_impression, item_score in zip(ids,
-                                                                  impression_ids,
-                                                                  item_impressions,
-                                                                  item_scores):
+        for id, impression_id, item_impression, item_score, selected_impression in zip(
+                ids,
+                impression_ids,
+                item_impressions,
+                item_scores,
+                selected_impression):
 
             impression_id = impression_id.to(self.device)
             item_impression = item_impression.to(self.device).float()
@@ -74,6 +80,7 @@ class Prediction(object):
                 predicted=item_score,
                 impressions=item_impression,
                 impreession_ids=impression_id,
+                selected_impression=selected_impression,
 
             )
             cur_pred = self.predictions.iloc[self.prediction_ptr]

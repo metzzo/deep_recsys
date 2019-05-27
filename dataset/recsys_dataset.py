@@ -23,6 +23,7 @@ RecSysSampleWithImpressions = namedtuple('RecSysSampleWithImpressions', [
     'session_targets',
     'impressions',
     'impression_ids',
+    'target_index',
     'ids',
 ], verbose=False)
 
@@ -49,7 +50,7 @@ def collator_with_impressions(items, item_size):
     # TODO: adapt if labels are missing
     items.sort(key=lambda x: len(x[0]), reverse=True)
 
-    data, impressions, impression_ids, labels, ids = zip(*items)
+    data, impressions, impression_ids, target_index, labels, ids = zip(*items)
 
     sessions, session_lengths, session_targets = _internal_collator(data, labels, item_size)
 
@@ -59,6 +60,7 @@ def collator_with_impressions(items, item_size):
         session_targets=session_targets,
         impressions=impressions,
         impression_ids=impression_ids,
+        target_index=target_index,
         ids=ids,
     )
 
@@ -177,11 +179,19 @@ class RecSysDataset(Dataset):
                 items = self.rec_sys_data.item_df.sample(25)
                 item_impressions_id = items.index.values
                 item_impressions = np.array(items)
+            idx = np.where(item_impressions_id == last_row['reference'])[0]
+            if len(idx) == 0:
+                item_impressions_id[0] = last_row['reference']
+                item_impressions[0] = target_properties
+                idx = 0
+            else:
+                idx = idx[0]
 
-            if np.count_nonzero(np.isnan(item_impressions)) > 0:
-                print("swag")
-
-            result += [item_impressions, item_impressions_id]
+            result += [
+                item_impressions,
+                item_impressions_id,
+                int(idx)
+            ]
             simple_result += [last_row[SUBM_INDICES]]
 
         if target_properties is not None:

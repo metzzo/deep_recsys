@@ -34,8 +34,8 @@ recommender_configs = [
         "reduce_patience": 20,
         "num_gru_layers": 1,
         "fc_layer_size": 200,
-        "phases": ['train', 'train_rank', 'val'], #  'train_val',
-        "dataset_size": 10000,
+        "phases": ['train', 'train_rank', 'val'], #  'train_val','train_val',
+        "dataset_size": None,
     },
 ]
 
@@ -56,6 +56,6 @@ def prepare_config(config):
         'weight_decay': config.get('weight_decay') or 0.00001,
         'fc_layer_size': config.get('fc_layer_size') or 250,
         'num_gru_layers': config.get('num_gru_layers') or 1,
-        'dataset_size': config.get('dataset_size') or None,
+        'dataset_size': config.get('dataset_size'),
     }
 

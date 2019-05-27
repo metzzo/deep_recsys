@@ -62,7 +62,7 @@ def train(config, state=None):
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     data = get_rec_sys_data(
-        size=10000
+        size=config.get('dataset_size')
     )
 
     train_dataset = RecSysDataset(
@@ -106,8 +106,9 @@ def train(config, state=None):
         target_item_size=train_dataset.target_item_size,
     )
     loss_function = nn.MSELoss()
+    impression_loss_function = nn.CrossEntropyLoss()
     rc_optimizer = optim.Adam(recommend_network.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    ir_optimizer = optim.Adam(impression_rank_network.parameters(), lr=0.1, weight_decay=0.0)
+    ir_optimizer = optim.Adam(impression_rank_network.parameters(), lr=0.01, weight_decay=0.0)
     rc_lr_scheduler = ReduceLROnPlateau(rc_optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
     ir_lr_scheduler = ReduceLROnPlateau(ir_optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
 
@@ -185,12 +186,14 @@ def train(config, state=None):
             with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
                 for idx, data in enumerate(data_loaders[phase]):
                     if phase != 'train':
-                        sessions, session_lengths, session_targets, item_impressions, impression_ids, ids = data
+                        sessions, session_lengths, session_targets, item_impressions, impression_ids, target_index, ids = data
                     else:
                         sessions, session_lengths, session_targets = data
                         impression_ids = None
                         item_impressions = None
                         ids = None
+                        target_index = None
+
 
                     sessions = sessions.to(device)
                     session_targets = session_targets.to(device)
@@ -205,24 +208,26 @@ def train(config, state=None):
                             losses[idx] = loss.item()
                     elif phase == 'train_rank':
                         ir_optimizer.zero_grad()
-                        with torch.set_grad_enabled(True):
-                            item_scores = recommend_network(sessions, session_lengths).float()
-                            selected_impression = impression_rank_network(item_impressions, item_scores).float()
+                        item_scores = recommend_network(sessions, session_lengths).float()
 
-                            loss = loss_function(selected_impression, session_targets)
+                        with torch.set_grad_enabled(True):
+                            predicted = impression_rank_network(item_impressions, item_scores)
+                            target_index = torch.stack(target_index, dim=0).to(device)
+                            loss = impression_loss_function(predicted, target_index)
                             loss.backward()
                             ir_optimizer.step()
                             losses[idx] = loss.item()
                     else:
                         with torch.set_grad_enabled(False):
                             item_scores = recommend_network(sessions, session_lengths).float()
-                            selected_impression = impression_rank_network(item_impressions, item_scores).float()
+                            selected_impression = impression_rank_network(item_impressions, item_scores)
 
                             cur_prediction.add_predictions(
                                 ids=ids,
                                 impression_ids=impression_ids,
                                 item_impressions=item_impressions,
-                                item_scores=selected_impression
+                                item_scores=item_scores,
+                                selected_impression=selected_impression,
                             )
                     bar.update(idx)
             if do_validation:
