@@ -121,18 +121,26 @@ class RecSysDataset(Dataset):
         self.empty_array = np.array(0)
 
     def __getitem__(self, index):
-        indices = self.rec_sys_data.groups[
+        indices = np.array(self.rec_sys_data.groups[
             self.session_ids[index]
-        ]
+        ])
 
-        # augment data by making this session shorter
-        if self.train_mode and len(indices) > 3:
-            start_pos = randint(0, len(indices) - 3)
-            end_pos = randint(start_pos + 2, len(indices) - 1)
-            indices = indices.to_numpy()[start_pos:end_pos]
+        # sample just a certain percentage of session entries
+        if self.train_mode:
+            if random() > 0.5:
+                if random() > 0.5:
+                    if len(indices) > 2:
+                        indices = np.random.choice(indices, randint(2, len(indices)))
+                else:
+                    if len(indices) > 3:
+                        # augment data by making this session shorter
+                        start_pos = randint(0, len(indices) - 3)
+                        end_pos = randint(start_pos + 2, len(indices) - 1)
+                        indices = indices[start_pos:end_pos]
 
-        if self.train_mode and random() > 0.5:
-            indices = np.flip(indices)
+            if random() > 0.5:
+                # randomly flip indiced
+                indices = np.flip(indices)
 
         session = self.rec_sys_data.session_df.loc[
             indices
@@ -176,7 +184,6 @@ class RecSysDataset(Dataset):
 
             if create_impression or len(item_impressions) == 0:
                 print("Create impressions ", self.session_ids[index], session['user_id'])
-                # TODO: do something more clever, e.g.: by sorting by popularity
                 items = self.rec_sys_data.item_df.sample(25)
                 item_impressions_id = items.index.values
                 item_impressions = np.array(items)

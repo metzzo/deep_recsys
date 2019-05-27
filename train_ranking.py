@@ -13,7 +13,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from dataset.ranknet_dataset import RankNetDataset, RankNetData
-from network.ranknet_network import RankNetNetwork
+
+from network.impression_network import ImpressionRankNetwork
 from ranking_configs import ranking_configs, prepare_config
 from utility.helpers import get_string_timestamp
 from utility.split_utility import AllSamplesExceptStrategy, RandomSampleStrategy, AllSamplesIncludeStrategy
@@ -89,12 +90,12 @@ def train(config, state=None):
         split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ranking_indices),
     )
 
-    network = RankNetNetwork(
+    network = ImpressionRankNetwork(
         config=config,
-        item_feature_size=train_dataset.item_feature_size,
-        device=device
+        device=device,
+        item_size=202,
     )
-    loss_function = nn.BCEWithLogitsLoss()
+    loss_function = nn.CrossEntropyLoss()
     optimizer = optim.Adam(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
     lr_scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
 
@@ -158,18 +159,16 @@ def train(config, state=None):
             losses.fill(0)
             with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
                 for idx, data in enumerate(data_loaders[phase]):
-                    item1, item2, target = data
+                    impressions, target = data
 
-                    item1 = item1.to(device)
-                    item2 = item2.to(device)
                     target = target.to(device)
 
                     optimizer.zero_grad()
 
                     with torch.set_grad_enabled(phase == 'train'):
                         predicted = network(
-                            input_1=item1,
-                            input_2=item2,
+                            impressions=impressions,
+                            target=target,
                         ).float()
 
                         if phase == 'train':

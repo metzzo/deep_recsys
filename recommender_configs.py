@@ -1,13 +1,14 @@
 recommender_configs = [
     {
         "name": "complex",
-        "hidden_dim": 128,
-        "patience": 100,
+        "hidden_dim": 256,
+        "patience": 10,
         "batch_size": 64,
-        "num_epochs": 500,
+        "num_epochs": 100,
         "reduce_patience": 20,
         "num_gru_layers": 1,
-        "fc_layer_size": 200,
+        "fc_layer_size": 256,
+        "weight_decay": 0.0,
         "phases": ['train',  'val'], #  'train_val','train_val', 'train_rank',
         "use_cosine_similarity": True,
         "dataset_size": 1000000,

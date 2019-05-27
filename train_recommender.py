@@ -131,13 +131,13 @@ def train(config, state=None):
     }
 
     data_loaders = {
-        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                             collate_fn=train_dataset.collator),
-        "train_rank": DataLoader(train_rank_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+        "train_rank": DataLoader(train_rank_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                             collate_fn=train_rank_dataset.collator),
-        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                                 collate_fn=train_val_dataset.collator),
-        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                           collate_fn=val_dataset.collator),
     }
 
