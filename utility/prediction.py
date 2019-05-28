@@ -10,7 +10,7 @@ from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 rank_net = None
 
 class Prediction(object):
-    def __init__(self, dataset, device, add_reference=True, use_cosine_similarity=False):
+    def __init__(self, dataset, device, use_cosine_similarity=False):
         super()
         self.dataset = dataset
         self.device = device
@@ -23,28 +23,9 @@ class Prediction(object):
             'step': [''] * len(dataset),
             'item_recommendations': [''] * len(dataset),
         }
-        if add_reference:
-            dict_data['reference'] = [''] * len(dataset)
 
         self.predictions = pd.DataFrame.from_dict(dict_data)
-        self.add_reference = add_reference
         self.use_cosine_similarity = use_cosine_similarity
-
-        # load rank network
-        """
-        from train_ranking import load_ranknet_network
-        from train_ranking import DATA_PATH
-
-        global rank_net
-
-        if rank_net is None:
-            rank_net = load_ranknet_network(
-                path=os.path.join(DATA_PATH, 'ranking_model', '2019_05_26_14_34_49.pth'),
-                device=device
-            )
-            rank_net = rank_net.to(device)
-        self.rank_net = rank_net
-        """
 
     def rank(self, predicted, impressions, impreession_ids, selected_impression):
         if self.use_cosine_similarity:
@@ -65,8 +46,10 @@ class Prediction(object):
 
         return sorted_impressions
 
-    def add_predictions(self, ids, impression_ids, item_impressions, item_scores, selected_impression):
+    def add_predictions(self, ids, impression_ids, item_impressions, item_scores, selected_impression=None):
         item_scores = item_scores.to(self.device)
+        if selected_impression is None:
+            selected_impression = [0] * len(ids)
 
         for id, impression_id, item_impression, item_score, selected_impression in zip(
                 ids,
@@ -90,10 +73,7 @@ class Prediction(object):
             cur_pred.at['session_id'] = id['session_id']
             cur_pred.at['timestamp'] = id['timestamp']
             cur_pred.at['step'] = id['step']
-            if self.add_reference:
-                cur_pred.at['reference'] = self.dataset.rec_sys_data.session_df.loc[
-                    self.dataset.rec_sys_data.groups[id['session_id']]
-                ]['reference'].iloc[-1]
+
             self.prediction_ptr += 1
             #except e:
             #    print("Prediction Error", impression_id.detach().cpu().numpy(), item_impression.detach().cpu().numpy())

@@ -35,7 +35,6 @@ class RecommenderNetwork(nn.Module):
         self.hidden2tag = nn.Sequential(
             nn.Linear(self.hidden_dim, fcn_size),
             nn.BatchNorm1d(num_features=fcn_size),
-            nn.ReLU(),
             nn.Linear(fcn_size, target_item_size),
             nn.Sigmoid(),
         )

@@ -13,55 +13,25 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from dataset.ranknet_dataset import RankNetDataset, RankNetData
+from dataset.recsys_dataset import RecSysDataset
 
 from network.impression_network import ImpressionRankNetwork
+from network.recommender_network import RecommenderNetwork
 from ranking_configs import ranking_configs, prepare_config
+from train_recommender import get_rec_sys_data, DATA_PATH
 from utility.helpers import get_string_timestamp
+from utility.prediction import Prediction
 from utility.split_utility import AllSamplesExceptStrategy, RandomSampleStrategy, AllSamplesIncludeStrategy
 
-DATA_PATH = './data/'
-RAW_DATA_PATH = os.path.join(DATA_PATH, 'raw')
 
-MODEL_NAME = get_string_timestamp()
-MODEL_BASE_PATH = os.path.join(DATA_PATH, 'ranking_model')
-MODEL_PATH = os.path.join(DATA_PATH, 'ranking_model', MODEL_NAME + ".pth")
+def train(config, state=None, model=None):
+    MODEL_NAME = get_string_timestamp()
+    MODEL_BASE_PATH = os.path.join(DATA_PATH, 'ranking_model')
+    MODEL_PATH = os.path.join(DATA_PATH, 'ranking_model', MODEL_NAME + ".pth")
 
-rank_net_data = None
-
-
-def load_ranknet_network(path, device):
-    state = torch.load(path)
-
-    config = prepare_config(state.get('config'))
-    network_state_dict = state.get('network_state_dict') or state
-
-    network = RankNetNetwork(
-        config=config,
-        device=device,
-        item_feature_size=202  # TODO do not hardcode
-    )
-    network.load_state_dict(network_state_dict)
-    network.eval()
-
-    return network
-
-
-def get_rank_net_data(dataset_size):
-    global rank_net_data
-
-    if rank_net_data is None:
-        rank_net_data = RankNetData(
-            name='rank_data.p',
-            size=dataset_size,
-        )
-
-    return rank_net_data
-
-
-def train(config, state=None):
     random.seed(42)
 
-    config = prepare_config(config)
+    config = prepare_config(config, model=model)
 
     batch_size = config.get('batch_size')
     patience = config.get('patience')
@@ -75,25 +45,41 @@ def train(config, state=None):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    rank_net_data = get_rank_net_data(dataset_size=config.get('dataset_size'))
+    data = get_rec_sys_data(
+        size=config.get('dataset_size')
+    )
 
-    train_dataset = RankNetDataset(
-        data=rank_net_data,
+    train_dataset = RecSysDataset(
+        rec_sys_data=data,
         split_strategy=RandomSampleStrategy(split=0.7),
+        include_impressions=True,
+        train_mode=False
     )
-    train_val_dataset = RankNetDataset(
-        data=rank_net_data,
-        split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ranking_indices),
+    train_val_dataset = RecSysDataset(
+        rec_sys_data=data,
+        split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ids),
+        include_impressions=True
     )
-    val_dataset = RankNetDataset(
-        data=rank_net_data,
-        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ranking_indices),
+    val_dataset = RecSysDataset(
+        rec_sys_data=data,
+        split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
+        include_impressions=True
     )
+
+    recommender_state = torch.load(config.get('recommender_model'))
+
+    recommend_network = RecommenderNetwork(
+        config=recommender_state.get('config'),
+        item_size=train_dataset.item_size,
+        target_item_size=train_dataset.target_item_size,
+    )
+    recommend_network.load_state_dict(recommender_state.get('network_state_dict'))
+    recommend_network.eval()
 
     network = ImpressionRankNetwork(
         config=config,
         device=device,
-        item_size=202,
+        item_size=train_dataset.item_size,
     )
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.Adam(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -116,9 +102,12 @@ def train(config, state=None):
     }
 
     data_loaders = {
-        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0),
-        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=0),
-        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0),
+        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+                                 collate_fn=train_dataset.collator),
+        "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
+                                collate_fn=train_val_dataset.collator),
+        "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
+                          collate_fn=val_dataset.collator),
     }
 
     sizes = {
@@ -130,6 +119,7 @@ def train(config, state=None):
     losses = np.zeros(int(len(train_dataset) / batch_size + 1.0))
 
     network = network.to(device)
+    recommend_network = recommend_network.to(device)
 
     cur_patience = 0
     print("Uses CUDA: {0}".format(use_cuda))
@@ -137,81 +127,60 @@ def train(config, state=None):
         print('-' * 15, "Epoch: ", epoch + 1, '\t', '-' * 15)
 
         cur_phase = phases
-        if epoch == num_epochs - 1:
-            cur_phase = ['train', 'train_val', 'val']  # for last epoch do also train_val to find out if there was overfitting
 
-        for phase in cur_phase:
+        for phase in cur_phase:  # 'train_val',
             cur_dataset = datasets[phase]
-
-            dict_data = {
-                "predicted": [0] * len(cur_dataset),
-                "target": [0] * len(cur_dataset),
-                "baseline": [0] * len(cur_dataset),
-            }
-            cur_prediction = pd.DataFrame.from_dict(dict_data)
-            prediction_ptr = 0
+            cur_prediction = Prediction(
+                dataset=cur_dataset,
+                device=device,
+                use_cosine_similarity=False,
+            )
+            do_validation = phase != 'train'
             if phase == 'train':
                 network.train()
             else:
                 network.eval()
 
-            do_validation = phase != 'train'
             losses.fill(0)
             with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
                 for idx, data in enumerate(data_loaders[phase]):
-                    impressions, target = data
+                    sessions, session_lengths, _, item_impressions, impression_ids, target_index, prices, ids = data
 
-                    target = target.to(device)
+                    sessions = sessions.to(device)
 
-                    optimizer.zero_grad()
+                    if phase == 'train':
+                        optimizer.zero_grad()
+                        item_scores = recommend_network(sessions, session_lengths).float()
 
-                    with torch.set_grad_enabled(phase == 'train'):
-                        predicted = network(
-                            impressions=impressions,
-                            target=target,
-                        ).float()
-
-                        if phase == 'train':
-                            loss = loss_function(predicted, target)
+                        with torch.set_grad_enabled(True):
+                            predicted = network(item_impressions, item_scores, prices)
+                            target_index = torch.stack(target_index, dim=0).to(device)
+                            loss = loss_function(predicted, target_index)
                             loss.backward()
                             optimizer.step()
                             losses[idx] = loss.item()
+                    else:
+                        with torch.set_grad_enabled(False):
+                            item_scores = recommend_network(sessions, session_lengths).float()
+                            selected_impression = network(item_impressions, item_scores, prices)
 
-                    if do_validation:
-                        predicted = F.sigmoid(predicted)
-
-                        predicted = predicted \
-                            .detach().cpu().numpy().flatten()
-                        target = target \
-                            .detach().cpu().numpy().flatten()
-
-                        cur_prediction['predicted'][prediction_ptr: prediction_ptr + len(predicted)] = predicted
-                        cur_prediction['target'][prediction_ptr: prediction_ptr + len(target)] = target
-                        cur_prediction['baseline'][prediction_ptr: prediction_ptr + len(target)] = F.cosine_similarity(
-                            item1,
-                            item2
-                        ).cpu().numpy()
-
-                        prediction_ptr += len(target)
+                            cur_prediction.add_predictions(
+                                ids=ids,
+                                impression_ids=impression_ids,
+                                item_impressions=item_impressions,
+                                item_scores=item_scores,
+                                selected_impression=selected_impression,
+                            )
                     bar.update(idx)
             if do_validation:
-                score = f1_score(
-                    cur_prediction['predicted'].values > 0.5,
-                    cur_prediction['target'].values
-                )
+                score = cur_prediction.get_score()
 
-                baseline_pred = ((1 + cur_prediction['baseline'].values)/2) > 0.5
-                baseline = f1_score(
-                    baseline_pred > 0.5,
-                    cur_prediction['target'].values
-                )
-
-                print(phase, " Score: ", score, "Baseline:", baseline)
+                print(phase, " Score: ", score)
+                lr_scheduler.step(score)
                 lr_scheduler.step(score)
                 if phase == 'val':
                     if best_score_so_far is None or score > best_score_so_far:
                         best_score_so_far = score
-                        best_baseline_so_far = baseline
                         torch.save({
                             'epoch': epoch,
                             'best_score_so_far': best_score_so_far,
@@ -226,7 +195,7 @@ def train(config, state=None):
                         if cur_patience > patience:
                             print("Not patient anymore => Quit")
                             break
-            if phase == 'train':
+            if not do_validation:
                 print(phase, " Loss: ", losses.mean())
         if cur_patience > patience:
             break
@@ -244,7 +213,7 @@ def train(config, state=None):
     return best_score_so_far, best_baseline_so_far, target_path
 
 
-if __name__ == '__main__':
+def train_ranking(model=None):
     print("Train Ranking")
     best_score_so_far = 0
     best_config = None
@@ -252,7 +221,7 @@ if __name__ == '__main__':
     best_baseline_so_far = 0
     for config in ranking_configs:
         print("Train config ", config['name'])
-        current_score, current_baseline, current_path = train(config)
+        current_score, current_baseline, current_path = train(config, model=model)
         if current_score > best_score_so_far:
             best_score_so_far = current_score
             best_baseline_so_far = current_baseline
@@ -264,4 +233,9 @@ if __name__ == '__main__':
     print("Best Score: ", str(best_score_so_far))
     print("Best Baseline: ", str(best_baseline_so_far))
     print("Best Path: ", str(best_path))
+
+    return best_path
+
+if __name__ == '__main__':
+    train_ranking()
 

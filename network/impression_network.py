@@ -7,27 +7,20 @@ class ImpressionRankNetwork(nn.Module):
         super(ImpressionRankNetwork, self).__init__()
         self.device = device
         self.rank = nn.Sequential(
-            nn.Dropout(0.1),
             nn.Linear(202 * 2, 202),
-            nn.ReLU(),
             nn.BatchNorm1d(num_features=202),
-            nn.Dropout(0.1),
+            nn.ReLU(),
             nn.Linear(202, 128),
-            nn.ReLU(),
             nn.BatchNorm1d(num_features=128),
-            nn.Dropout(0.1),
-            nn.Linear(128, 16),
             nn.ReLU(),
-            nn.Dropout(0.1),
-           # nn.ReLU(),
-           # nn.BatchNorm1d(num_features=202),
-           # nn.Linear(202, 1),
+            nn.Linear(128, 16),
+            nn.BatchNorm1d(num_features=16),
+            nn.ReLU(),
         )
         self.combine = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(16 * 25, 25),
-            nn.ReLU(),
+            nn.Linear(16 * 25 + 25, 25),
             nn.BatchNorm1d(num_features=25),
+            nn.ReLU(),
             nn.Linear(25, 25),
         )
 
@@ -35,7 +28,9 @@ class ImpressionRankNetwork(nn.Module):
         concat = torch.cat([impression, wants], dim=1)
         return self.rank(concat) #  self.rank((impression + wants)/2.0).float() #
 
-    def forward(self, impressions: [torch.Tensor], wants: torch.Tensor):
+    def forward(self, impressions: [torch.Tensor], wants: torch.Tensor, prices: [torch.Tensor]):
+        prices = torch.stack(prices).to(device=self.device).float()
+
         wants = wants.detach()
         wants = (wants > 0.5).float()
 
@@ -46,5 +41,6 @@ class ImpressionRankNetwork(nn.Module):
 
         ranked = [self.rank_impression(padded_sequence[:, i, :], wants) for i in range(0, padded_sequence.size(1))]
         ranked = torch.cat(ranked, dim=1)
+        ranked = torch.cat([ranked, prices], dim=1)
         ranked = self.combine(ranked) # torch.rand(ranked.shape).cuda()
         return ranked

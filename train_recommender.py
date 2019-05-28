@@ -30,7 +30,7 @@ MODEL_PATH = os.path.join(DATA_PATH, 'model', MODEL_NAME + ".pth")
 
 DEBUG = False
 
-DO_SUBMISSION = False
+DO_SUBMISSION = True
 
 rec_sys_data = None
 
@@ -75,12 +75,6 @@ def train(config, state=None):
         include_impressions=False,
         train_mode=True
     )
-    train_rank_dataset = RecSysDataset(
-        rec_sys_data=data,
-        split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ids),
-        include_impressions=True,
-        train_mode=False
-    )
     train_val_dataset = RecSysDataset(
         rec_sys_data=data,
         split_strategy=AllSamplesIncludeStrategy(include=train_dataset.session_ids),
@@ -92,40 +86,27 @@ def train(config, state=None):
         include_impressions=True
     )
 
-    impression_rank_network = ImpressionRankNetwork(
-        config=config,
-        item_size=train_dataset.target_item_size,
-        device=device
-    )
-
     recommend_network = RecommenderNetwork(
         config=config,
         item_size=train_dataset.item_size,
         target_item_size=train_dataset.target_item_size,
     )
     loss_function = nn.MSELoss()
-    impression_loss_function = nn.CrossEntropyLoss()
     rc_optimizer = optim.Adam(recommend_network.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    ir_optimizer = optim.Adam(impression_rank_network.parameters(), lr=0.01, weight_decay=0.0)
     rc_lr_scheduler = ReduceLROnPlateau(rc_optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
-    ir_lr_scheduler = ReduceLROnPlateau(ir_optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
 
     start_epoch = 0
     best_score_so_far = None
 
     if state:
         rc_optimizer.load_state_dict(state['rc_optimizer_state_dict'])
-        ir_optimizer.load_state_dict(state['ir_optimizer_state_dict'])
-        ir_lr_scheduler.load_state_dict(state['ir_optimizer_state_dict'])
         rc_lr_scheduler.load_state_dict(state['rc_optimizer_state_dict'])
         recommend_network.load_state_dict(state['network_state_dict'])
         start_epoch = state['epoch']
         best_score_so_far = state['best_score_so_far']
-        impression_rank_network = state['impression_rank_network']
 
     datasets = {
         "train": train_dataset,
-        "train_rank": train_rank_dataset,
         "train_val": train_dataset,
         "val": val_dataset,
     }
@@ -133,8 +114,6 @@ def train(config, state=None):
     data_loaders = {
         "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                             collate_fn=train_dataset.collator),
-        "train_rank": DataLoader(train_rank_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
-                            collate_fn=train_rank_dataset.collator),
         "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                                 collate_fn=train_val_dataset.collator),
         "val": DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
@@ -143,7 +122,6 @@ def train(config, state=None):
 
     sizes = {
         "train": int(len(train_dataset) / batch_size) + 1,
-        "train_rank": int(len(train_dataset) / batch_size) + 1,
         "train_val": int(len(train_dataset) / batch_size) + 1,
         "val": int(len(val_dataset) / batch_size) + 1,
     }
@@ -151,7 +129,6 @@ def train(config, state=None):
     losses = np.zeros(int(len(train_dataset) / batch_size + 1.0))
 
     recommend_network = recommend_network.to(device)
-    impression_rank_network = impression_rank_network.to(device)
 
     cur_patience = 0
     print("Uses CUDA: {0}".format(use_cuda))
@@ -165,31 +142,26 @@ def train(config, state=None):
             cur_prediction = Prediction(
                 dataset=cur_dataset,
                 device=device,
-                add_reference=False,
                 use_cosine_similarity=use_cosine_similarity,
             )
-            do_validation = phase != 'train' and phase != 'train_rank'
+            do_validation = phase != 'train'
             if phase == 'train':
                 recommend_network.train()
-                impression_rank_network.eval()
-            elif phase == 'train_rank':
-                recommend_network.eval()
-                impression_rank_network.train()
             else:
                 recommend_network.eval()
-                impression_rank_network.eval()
 
             losses.fill(0)
             with progressbar.ProgressBar(max_value=sizes[phase], redirect_stdout=True) as bar:
                 for idx, data in enumerate(data_loaders[phase]):
                     if phase != 'train':
-                        sessions, session_lengths, session_targets, item_impressions, impression_ids, target_index, ids = data
+                        sessions, session_lengths, session_targets, item_impressions, impression_ids, target_index, prices, ids = data
                     else:
                         sessions, session_lengths, session_targets = data
                         impression_ids = None
                         item_impressions = None
                         ids = None
                         target_index = None
+                        prices = None
 
 
                     sessions = sessions.to(device)
@@ -203,30 +175,15 @@ def train(config, state=None):
                             loss.backward()
                             rc_optimizer.step()
                             losses[idx] = loss.item()
-                    elif phase == 'train_rank':
-                        if use_cosine_similarity:
-                            print("Weird settings train_rank vs cosine_similarity")
-                        ir_optimizer.zero_grad()
-                        item_scores = recommend_network(sessions, session_lengths).float()
-
-                        with torch.set_grad_enabled(True):
-                            predicted = impression_rank_network(item_impressions, item_scores)
-                            target_index = torch.stack(target_index, dim=0).to(device)
-                            loss = impression_loss_function(predicted, target_index)
-                            loss.backward()
-                            ir_optimizer.step()
-                            losses[idx] = loss.item()
                     else:
                         with torch.set_grad_enabled(False):
                             item_scores = recommend_network(sessions, session_lengths).float()
-                            selected_impression = impression_rank_network(item_impressions, item_scores)
 
                             cur_prediction.add_predictions(
                                 ids=ids,
                                 impression_ids=impression_ids,
                                 item_impressions=item_impressions,
                                 item_scores=item_scores,
-                                selected_impression=selected_impression,
                             )
                     bar.update(idx)
             if do_validation:
@@ -234,7 +191,6 @@ def train(config, state=None):
 
                 print(phase, " Score: ", score)
                 rc_lr_scheduler.step(score)
-                ir_lr_scheduler.step(score)
                 if phase == 'val':
                     if best_score_so_far is None or score > best_score_so_far:
                         best_score_so_far = score
@@ -242,9 +198,7 @@ def train(config, state=None):
                             'epoch': epoch,
                             'best_score_so_far': best_score_so_far,
                             'rc_optimizer_state_dict': rc_optimizer.state_dict(),
-                            'ir_optimizer_state_dict': ir_optimizer.state_dict(),
                             'network_state_dict': recommend_network.state_dict(),
-                            'impression_rank_network': impression_rank_network.state_dict(),
                             'config': config,
                         }, MODEL_PATH)
                         cur_patience = 0
@@ -272,7 +226,7 @@ def train(config, state=None):
     return best_score_so_far, target_path
 
 
-if __name__ == '__main__':
+def train_recommender():
     best_score_so_far = 0
     best_config = None
     best_path = None
@@ -288,8 +242,16 @@ if __name__ == '__main__':
     print("Best Config: ", str(best_config))
     print("Best Score: ", str(best_score_so_far))
     print("Best Path: ", str(best_path))
+
+    from train_ranking import train_ranking
+    best_ranking_path = train_ranking(model=best_path)
+
     if DO_SUBMISSION:
         create_submission(
-            path=best_path
+            recommender_path=best_path,
+            ranking_path=best_ranking_path,
         )
+
+if __name__ == '__main__':
+    train_recommender()
 

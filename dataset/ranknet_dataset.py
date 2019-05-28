@@ -2,16 +2,13 @@ import os
 import pickle
 from random import randint, random
 
+import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from create_submission import do_prediction
 from dataset.load_items import load_items
-from dataset.recsys_dataset import RecSysDataset
-from utility.split_utility import RandomSampleStrategy
-from train_recommender import get_rec_sys_data, RAW_DATA_PATH
-import pandas as pd
-import numpy as np
+from train_recommender import RAW_DATA_PATH
 
 
 def get_ranknet_data(name, size, session_data):

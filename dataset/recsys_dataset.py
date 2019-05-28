@@ -2,6 +2,7 @@ from collections import namedtuple
 from functools import partial
 from random import randint, random
 
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data.dataset import Dataset
 
 import pandas as pd
@@ -24,6 +25,7 @@ RecSysSampleWithImpressions = namedtuple('RecSysSampleWithImpressions', [
     'impressions',
     'impression_ids',
     'target_index',
+    'prices',
     'ids',
 ], verbose=False)
 
@@ -46,11 +48,13 @@ def _internal_collator(data, session_targets, item_size):
     return sessions, torch.tensor(lengths), session_targets
 
 
+# TODO: make different collators for different data
+# and NOT one for all => not performant
 def collator_with_impressions(items, item_size):
     # TODO: adapt if labels are missing
     items.sort(key=lambda x: len(x[0]), reverse=True)
 
-    data, impressions, impression_ids, target_index, labels, ids = zip(*items)
+    data, impressions, impression_ids, target_index, prices, labels, ids = zip(*items)
 
     sessions, session_lengths, session_targets = _internal_collator(data, labels, item_size)
 
@@ -61,6 +65,7 @@ def collator_with_impressions(items, item_size):
         impressions=impressions,
         impression_ids=impression_ids,
         target_index=target_index,
+        prices=prices,
         ids=ids,
     )
 
@@ -111,7 +116,8 @@ class RecSysDataset(Dataset):
         item_feature_size = len(self.rec_sys_data.item_vectorizer.get_feature_names())
         # size of item vector
         # + action_type one hot encoding
-        self.item_size = item_feature_size + 6
+        self.item_size = item_feature_size + 1
+        # + 1 ... counter
         self.target_item_size = item_feature_size
         self.train_mode = train_mode
 
@@ -126,7 +132,7 @@ class RecSysDataset(Dataset):
         ])
 
         # sample just a certain percentage of session entries
-        if self.train_mode:
+        if self.train_mode and random() > 0.25:
             if random() > 0.5:
                 if random() > 0.5:
                     if len(indices) > 2:
@@ -153,16 +159,11 @@ class RecSysDataset(Dataset):
         item_properties = np.array(self.rec_sys_data.item_properties.loc[
             indices[:-1]
         ])
-
-        action_type_encoder = self.rec_sys_data.session_hot_encoders['action_type']
-        session_action_type = session['action_type'][:-1]
-        action_type = action_type_encoder.transform(np.array(session_action_type).reshape(-1, 1)).toarray()
+        counter = np.array([[i/float(len(item_properties))] for i in range(0, len(item_properties))])
 
         result = [np.hstack([
             item_properties,
-            action_type,
-#            session['delta_time'].values.reshape(-1, 1)[:-1],
-#            session['step'].values.reshape(-1, 1)[:-1],
+            counter,
         ])]
         simple_result = []
         if self.include_impressions:
@@ -173,6 +174,16 @@ class RecSysDataset(Dataset):
 
             item_impressions_id = np.array(item_impressions_df['impression'])
             item_impressions = None
+
+            last_prices = last_row['prices']
+            scaler = StandardScaler()
+            prices = scaler.fit_transform(np.array(list(map(int, last_prices.split('|')))).reshape(-1, 1))
+            if len(prices) < 25:
+                prices = np.concatenate(prices + np.zeros(25))
+
+            if len(prices) > 25:
+                prices = prices[:25]
+            prices = prices.flatten()
 
             create_impression = False
             try:
@@ -187,18 +198,23 @@ class RecSysDataset(Dataset):
                 items = self.rec_sys_data.item_df.sample(25)
                 item_impressions_id = items.index.values
                 item_impressions = np.array(items)
-            idx = np.where(item_impressions_id == last_row['reference'])[0]
-            if len(idx) == 0:
-                item_impressions_id[0] = last_row['reference']
-                item_impressions[0] = target_properties
-                idx = 0
+
+            if last_row['reference'] > 0:
+                idx = np.where(item_impressions_id == last_row['reference'])[0]
+                if len(idx) == 0:
+                    item_impressions_id[0] = last_row['reference']
+                    item_impressions[0] = target_properties
+                    idx = 0
+                else:
+                    idx = idx[0]
             else:
-                idx = idx[0]
+                idx = 0
 
             result += [
                 item_impressions,
                 item_impressions_id,
-                int(idx)
+                int(idx),
+                prices,
             ]
             simple_result += [last_row[SUBM_INDICES]]
 

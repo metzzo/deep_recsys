@@ -10,7 +10,8 @@ from utility.split_utility import RandomSampleStrategy
 from utility.helpers import get_string_timestamp
 import pandas as pd
 
-MODEL_PATH = './data/model/2019_05_27_01_05_01_0.63_full.pth'
+RECOMMENDER_MODEL_PATH = './data/model/2019_05_27_01_05_01_0.63_full.pth'
+RANKING_MODEL_PATH = './data/ranking_model/2019_05_28_01_21_00_0.45.pth'
 SUBMISSION_BATCH_SIZE = 512
 
 # these are missing in submission popular for some reason
@@ -25,7 +26,7 @@ def get_baseline():
     return pd.read_csv(os.path.join(RAW_DATA_PATH, 'submission_popular.csv'))
 
 
-def do_prediction(state, dataset, add_reference):
+def do_prediction(recommender_state, ranking_state, dataset):
     from recommender_configs import prepare_config
     from utility.prediction import Prediction
     from network.recommender_network import RecommenderNetwork
@@ -33,12 +34,14 @@ def do_prediction(state, dataset, add_reference):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    config = prepare_config(state.get('config'))
-    rc_network_state_dict = state.get('network_state_dict')
-    ir_network_state_dict = state.get('impression_rank_network')
+    recommender_state_config = prepare_config(recommender_state.get('config'))
+    rc_network_state_dict = recommender_state.get('network_state_dict')
+
+    ir_state_config = prepare_config(ranking_state.get('config'))
+    ir_network_state_dict = ranking_state.get('network_state_dict')
 
     recommender_network = RecommenderNetwork(
-        config=config,
+        config=recommender_state_config,
         item_size=dataset.item_size,
         target_item_size=dataset.target_item_size,
     )
@@ -46,7 +49,7 @@ def do_prediction(state, dataset, add_reference):
     recommender_network.eval()
 
     rank_network = ImpressionRankNetwork(
-        config=config,
+        config=ir_state_config,
         item_size=dataset.item_size,
         device=device,
     )
@@ -65,7 +68,6 @@ def do_prediction(state, dataset, add_reference):
     cur_prediction = Prediction(
         dataset=dataset,
         device=device,
-        add_reference=add_reference
     )
 
     recommender_network = recommender_network.to(device)
@@ -91,13 +93,14 @@ def do_prediction(state, dataset, add_reference):
     return cur_prediction
 
 
-def create_submission(path):
+def create_submission(recommender_path, ranking_path):
     from dataset.recsys_dataset import RecSysData, RecSysDataset
     from train_recommender import DATA_PATH
 
-    print("Create Submission File for: ", path)
+    print("Create Submission File for: ", recommender_path, ranking_path)
 
-    state = torch.load(path)
+    recommender_state = torch.load(recommender_path)
+    ranking_state = torch.load(ranking_path)
 
     test_rec_sys_data = RecSysData(mode=MODE, size=None)
 
@@ -108,7 +111,11 @@ def create_submission(path):
         train_mode=False
     )
 
-    cur_prediction = do_prediction(state, dataset, add_reference=False)
+    cur_prediction = do_prediction(
+        recommender_state=recommender_state,
+        ranking_state=ranking_state,
+        dataset=dataset
+    )
     pickle.dump(cur_prediction, open(os.path.join(DATA_PATH, 'prediction_dump.pickle'), "wb"), protocol=4)
     #cur_prediction = pickle.load(open(os.path.join(DATA_PATH, 'prediction_dump.pickle'), "rb"))
     submission_path = os.path.join(DATA_PATH, 'submissions', '{}.csv'.format(get_string_timestamp()))
@@ -141,4 +148,7 @@ def create_submission(path):
         predictions.to_csv(submission_path, index=False)
 
 if __name__ == '__main__':
-    create_submission(MODEL_PATH)
+    create_submission(
+        recommender_path=RECOMMENDER_MODEL_PATH,
+        ranking_path=RANKING_MODEL_PATH
+    )
