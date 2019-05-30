@@ -1,3 +1,6 @@
+from mlflow import log_metric, log_param, log_artifact
+
+
 recommender_configs = [
     {
         "name": "complex",
@@ -20,7 +23,7 @@ def prepare_config(config):
     if config is None:
         config = {}
 
-    return {
+    result = {
         'batch_size': config.get('batch_size') or 128,
         'patience': config.get('patience') or 100,
         'hidden_dim': config.get('hidden_dim') or 128,
@@ -35,4 +38,9 @@ def prepare_config(config):
         'dataset_size': config.get('dataset_size'),
         'use_cosine_similarity': config.get('use_cosine_similarity') or False
     }
+
+    for key, value in result.items():
+        log_param(key, value)
+
+    return result
 

@@ -9,7 +9,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from create_submission import create_submission
-from network.impression_network import ImpressionRankNetwork
 from recommender_configs import recommender_configs, prepare_config
 from network.recommender_network import RecommenderNetwork
 from dataset.recsys_dataset import RecSysDataset, RecSysData
@@ -187,7 +186,7 @@ def train(config, state=None):
                             )
                     bar.update(idx)
             if do_validation:
-                score = cur_prediction.get_score()
+                score, _ = cur_prediction.get_score()
 
                 print(phase, " Score: ", score)
                 rc_lr_scheduler.step(score)

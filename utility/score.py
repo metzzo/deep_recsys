@@ -59,4 +59,4 @@ def score_submissions(df_subm, df_gt, objective_function):
     df_subm_with_key['score'] = df_subm_with_key.apply(objective_function, axis=1)
     mrr = df_subm_with_key.score.mean()
 
-    return mrr
+    return mrr, df_subm_with_key

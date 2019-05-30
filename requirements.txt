@@ -2,3 +2,5 @@ sklearn
 pandas
 torchvision
 progressbar2
+mlflow
+matplotlib

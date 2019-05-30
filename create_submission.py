@@ -1,5 +1,6 @@
 import os
 import pickle
+import random
 
 import progressbar
 import torch
@@ -10,8 +11,8 @@ from utility.split_utility import RandomSampleStrategy
 from utility.helpers import get_string_timestamp
 import pandas as pd
 
-RECOMMENDER_MODEL_PATH = './data/model/2019_05_27_01_05_01_0.63_full.pth'
-RANKING_MODEL_PATH = './data/ranking_model/2019_05_28_01_21_00_0.45.pth'
+RECOMMENDER_MODEL_PATH = './data/model/2019_05_28_02_14_02_0.59.pth'
+RANKING_MODEL_PATH = './data/ranking_model/2019_05_28_09_25_11_63.pth'
 SUBMISSION_BATCH_SIZE = 512
 
 # these are missing in submission popular for some reason
@@ -27,6 +28,7 @@ def get_baseline():
 
 
 def do_prediction(recommender_state, ranking_state, dataset):
+    random.seed(42)
     from recommender_configs import prepare_config
     from utility.prediction import Prediction
     from network.recommender_network import RecommenderNetwork
@@ -61,7 +63,7 @@ def do_prediction(recommender_state, ranking_state, dataset):
 
         batch_size=SUBMISSION_BATCH_SIZE,
         shuffle=True,
-        num_workers=0,
+        num_workers=6,
         collate_fn=dataset.collator
     )
 
@@ -75,11 +77,11 @@ def do_prediction(recommender_state, ranking_state, dataset):
     print("Begin predicting...")
     with progressbar.ProgressBar(max_value=int(len(dataset) / SUBMISSION_BATCH_SIZE + 1), redirect_stdout=True) as bar:
         for idx, data in enumerate(data_loader):
-            sessions, session_lengths, _, item_impressions, impression_ids, _, ids = data
+            sessions, session_lengths, _, item_impressions, impression_ids, target_index, prices, ids = data
             sessions = sessions.to(device)
 
             item_scores = recommender_network(sessions, session_lengths).float()
-            selected_impression = rank_network(item_impressions, item_scores)
+            selected_impression = rank_network(item_impressions, item_scores, prices)
 
             cur_prediction.add_predictions(
                 ids=ids,

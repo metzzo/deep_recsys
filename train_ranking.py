@@ -102,7 +102,7 @@ def train(config, state=None, model=None):
     }
 
     data_loaders = {
-        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+        "train": DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                                  collate_fn=train_dataset.collator),
         "train_val": DataLoader(train_val_dataset, batch_size=batch_size, shuffle=False, num_workers=6,
                                 collate_fn=train_val_dataset.collator),
@@ -173,7 +173,7 @@ def train(config, state=None, model=None):
                             )
                     bar.update(idx)
             if do_validation:
-                score = cur_prediction.get_score()
+                score, _ = cur_prediction.get_score()
 
                 print(phase, " Score: ", score)
                 lr_scheduler.step(score)
@@ -235,6 +235,7 @@ def train_ranking(model=None):
     print("Best Path: ", str(best_path))
 
     return best_path
+
 
 if __name__ == '__main__':
     train_ranking()

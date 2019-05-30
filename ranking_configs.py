@@ -16,9 +16,9 @@ ranking_configs = [
     {
         "name": "complex",
         "hidden_dim": 128,
-        "patience": 6,
+        "patience": 3,
         "batch_size": 256,
-        "num_epochs":100,
+        "num_epochs": 25,
         "reduce_patience": 2,
         "fc_layer_size": 200,
         "learning_rate": 0.01,
