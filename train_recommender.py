@@ -84,6 +84,8 @@ def train(config, state=None):
         split_strategy=AllSamplesExceptStrategy(exclude=train_dataset.session_ids),
         include_impressions=True
     )
+    print("Num Train Sessions", len(train_dataset))
+    print("Num Validation Sessions", len(val_dataset))
 
     recommend_network = RecommenderNetwork(
         config=config,

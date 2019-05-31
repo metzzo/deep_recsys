@@ -14,7 +14,7 @@ recommender_configs = [
         "weight_decay": 0.0,
         "phases": ['train',  'val'], #  'train_val','train_val',
         "use_cosine_similarity": True,
-        #"dataset_size": 1000000,
+        "dataset_size": 1000000,
     },
 ]
 

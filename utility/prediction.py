@@ -4,10 +4,13 @@ import pandas as pd
 import torch.nn.functional as F
 import torch
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
 from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 
 rank_net = None
+
+IDF_RANKING = False
 
 class Prediction(object):
     def __init__(self, dataset, device, use_cosine_similarity=False):
@@ -15,6 +18,7 @@ class Prediction(object):
         self.dataset = dataset
         self.device = device
         self.prediction_ptr = 0
+        self.tfidf_vectorizer = dataset.rec_sys_data.item_vectorizer
 
         dict_data = {
             'user_id': [''] * len(dataset),
@@ -29,13 +33,26 @@ class Prediction(object):
 
     def rank(self, predicted, impressions, impreession_ids, selected_impression):
         if self.use_cosine_similarity:
-            item_score_repeated = predicted.repeat(len(impressions), 1)
-            sim = F.cosine_similarity(item_score_repeated, impressions)
-            sorted = torch.argsort(sim, descending=True)
+            if IDF_RANKING:
+                predicted = np.multiply(self.tfidf_vectorizer.idf_, predicted.detach().cpu().numpy())
+                impressions = impressions.detach().cpu().numpy()
+                count = impressions.shape[0]
+                idf = np.tile(self.tfidf_vectorizer.idf_, (count, 1))
+                impressions = np.multiply(impressions, idf)
+                predicted = np.tile(predicted, (1, 1))
+                similarities = -cosine_similarity(predicted, impressions).reshape(-1)
+                sorted = np.argsort(similarities)
+                sorted_impressions = ' '.join(
+                    np.take(impreession_ids.detach().cpu().numpy(), sorted).astype(str)
+                )
+            else:
+                item_score_repeated = predicted.repeat(len(impressions), 1)
+                sim = F.cosine_similarity(item_score_repeated, impressions)
+                sorted = torch.argsort(sim, descending=True)
 
-            sorted_impressions = ' '.join(
-                torch.gather(impreession_ids, 0, sorted).cpu().numpy().astype(str)
-            )
+                sorted_impressions = ' '.join(
+                    torch.gather(impreession_ids, 0, sorted).cpu().numpy().astype(str)
+                )
         else:
             impreession_ids = impreession_ids.detach().cpu().numpy()
             selected_impression = selected_impression.detach().cpu().numpy()[:len(impreession_ids)]

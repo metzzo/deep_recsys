@@ -18,8 +18,8 @@ SUBMISSION_BATCH_SIZE = 512
 # these are missing in submission popular for some reason
 #MISSING_IN_POPULAR = ["f4e7686de96f6", "28aed6ff4f5cf", "1dc624176b25a", "3146144dd180c", "6395e6166436d", "5fd68f0c5a86f", "0c558de5076d3", "be040dde80c92", "692367c2a1e0e", "2fea505733796", "9f73d9d10c1e3", "f3fcfa14e3c1b", "51d1160090a5e", "9b38c0d8c7736", "f761e020a59f6", "a22b00a80121c", "a9641c5908155", "76b4000458cba", "c18c1f77a080b", "4df3c262efcf1", "2555579f7370b", "dd8438cfdd337", "3a4e144c181a5", "1e65b48e85ac6", "16cb478a81ef9", "263608e619c16", "095a051b27180", "e1f2b85aa8440", "ff30a418d7821"]
 
-MODE = 'test'
-MERGE_WITH_REST = True
+MODE = 'train'
+MERGE_WITH_REST = False
 
 def get_baseline():
     from train_recommender import RAW_DATA_PATH
@@ -118,7 +118,7 @@ def create_submission(recommender_path, ranking_path):
         ranking_state=ranking_state,
         dataset=dataset
     )
-    pickle.dump(cur_prediction, open(os.path.join(DATA_PATH, 'prediction_dump.pickle'), "wb"), protocol=4)
+    #pickle.dump(cur_prediction, open(os.path.join(DATA_PATH, 'prediction_dump.pickle'), "wb"), protocol=4)
     #cur_prediction = pickle.load(open(os.path.join(DATA_PATH, 'prediction_dump.pickle'), "rb"))
     submission_path = os.path.join(DATA_PATH, 'submissions', '{}.csv'.format(get_string_timestamp()))
 

@@ -21,12 +21,12 @@ def load_items():
         )
         tfidf_vectorizer = TfidfVectorizer(
             strip_accents='unicode',
-            #min_df=0.01,
-            binary=True,
-            use_idf=False,
-            norm=None
+            binary=False,
+            use_idf=True,
         )
+
         item_properties = tfidf_vectorizer.fit_transform(raw_df['properties'])
+        item_properties = (item_properties > 0.00001).astype(float)
         item_properties = pd.DataFrame(item_properties.toarray())
         item_properties.set_index(raw_df['item_id'], inplace=True)
 
