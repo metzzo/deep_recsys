@@ -10,7 +10,7 @@ from utility.score import score_submissions, get_reciprocal_ranks, SUBM_INDICES
 
 rank_net = None
 
-IDF_RANKING = False
+IDF_RANKING = True
 
 class Prediction(object):
     def __init__(self, dataset, device, use_cosine_similarity=False):
@@ -34,6 +34,7 @@ class Prediction(object):
     def rank(self, predicted, impressions, impreession_ids, selected_impression):
         if self.use_cosine_similarity:
             if IDF_RANKING:
+                predicted = (predicted > 0.5).float()
                 predicted = np.multiply(self.tfidf_vectorizer.idf_, predicted.detach().cpu().numpy())
                 impressions = impressions.detach().cpu().numpy()
                 count = impressions.shape[0]
