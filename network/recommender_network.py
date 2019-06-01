@@ -33,9 +33,8 @@ class RecommenderNetwork(nn.Module):
 
         fcn_size = config.get('fc_layer_size')
         self.hidden2tag = nn.Sequential(
-            nn.Linear(self.hidden_dim, fcn_size),
-            nn.BatchNorm1d(num_features=fcn_size),
-            nn.Linear(fcn_size, target_item_size),
+            nn.Linear(self.hidden_dim, target_item_size),
+            nn.BatchNorm1d(num_features=target_item_size),
             nn.Sigmoid(),
         )
 
@@ -43,19 +42,6 @@ class RecommenderNetwork(nn.Module):
             nn.init.normal_(param)
 
     def forward(self, sessions: torch.Tensor, session_lengths: torch.Tensor):
-        #print("Begin shape", sessions.shape)
-        """
-        a = sessions
-        sessions = sessions.reshape(sessions.size(0), 1, sessions.size(1), sessions.size(2))
-        sessions = self.embedding(sessions)
-        b = sessions
-        sessions = sessions.permute([0, 2, 1, 3])
-        c = sessions
-        sessions = sessions.reshape(sessions.size(0), sessions.size(1), -1)
-        d = sessions
-        #print("End shape", d.shape)
-        """
-
         sessions = torch.nn.utils.rnn.pack_padded_sequence(sessions, session_lengths, batch_first=True)
 
         _, hidden = self.gru(sessions)

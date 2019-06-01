@@ -92,7 +92,7 @@ def train(config, state=None):
         item_size=train_dataset.item_size,
         target_item_size=train_dataset.target_item_size,
     )
-    loss_function = nn.MSELoss()
+    loss_function = nn.CosineEmbeddingLoss()
     rc_optimizer = optim.Adam(recommend_network.parameters(), lr=learning_rate, weight_decay=weight_decay)
     rc_lr_scheduler = ReduceLROnPlateau(rc_optimizer, mode='max', factor=reduce_factor, patience=reduce_patience)
 
@@ -172,7 +172,11 @@ def train(config, state=None):
                         rc_optimizer.zero_grad()
                         with torch.set_grad_enabled(True):
                             item_scores = recommend_network(sessions, session_lengths).float()
-                            loss = loss_function(item_scores, session_targets)
+                            loss = loss_function(
+                                item_scores,
+                                session_targets,
+                                torch.ones(session_targets.size(0)).to(device)
+                            )
                             loss.backward()
                             rc_optimizer.step()
                             losses[idx] = loss.item()
