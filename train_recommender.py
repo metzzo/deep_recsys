@@ -167,19 +167,21 @@ def train(config, state=None):
 
                     sessions = sessions.to(device)
                     session_targets = session_targets.to(device)
+                    session_targets = session_targets.float().view(-1, session_targets.size(2))
 
                     if phase == 'train':
                         rc_optimizer.zero_grad()
                         with torch.set_grad_enabled(True):
-                            item_scores = recommend_network(sessions, session_lengths).float()
+                            item_scores = recommend_network(sessions, session_lengths)
+                            item_scores = item_scores.float()
                             loss = loss_function(item_scores, session_targets)
                             loss.backward()
                             rc_optimizer.step()
                             losses[idx] = loss.item()
                     else:
                         with torch.set_grad_enabled(False):
-                            item_scores = recommend_network(sessions, session_lengths).float()
-
+                            item_scores = recommend_network(sessions, session_lengths, only_last=True)
+                            item_scores = item_scores.float()
                             cur_prediction.add_predictions(
                                 ids=ids,
                                 impression_ids=impression_ids,

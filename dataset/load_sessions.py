@@ -57,16 +57,14 @@ def prepare_reference(df: pd.DataFrame, action_types):
 
 
 def load_train_sessions(item_df, size):
-    size = size or 'full'
-
     return base_load_sessions(
         item_df=item_df,
         csv_file='train.csv',
         # needed to fit the encoders etc properly, this is okay, because the last reference wont have a reference anyway
         # so it will get filtered anyway
         secondary_csv_file='test.csv',
-        output_file='train_sessions_{}.p'.format(size),
-        shared_output_file='shared_{}.p'.format(size),
+        output_file='train_sessions_{}.p'.format(size or 'full'),
+        shared_output_file='shared_{}.p'.format(size or 'full'),
         label_encoders=None,
         hot_encoders=None,
         nrows=size
@@ -75,7 +73,6 @@ def load_train_sessions(item_df, size):
 
 def load_test_sessions(item_df, size):
     from train_recommender import DATA_PATH
-    size = size or 'full'
 
     shared_pickle_path = os.path.join(DATA_PATH, 'shared_{}.p'.format(size))
     shared_data = pickle.load(open(shared_pickle_path, "rb"))
@@ -84,8 +81,8 @@ def load_test_sessions(item_df, size):
         item_df=item_df,
         csv_file='test.csv',
         secondary_csv_file=None,
-        output_file='test_sessions_{}.p'.format(size),
-        shared_output_file='shared_{}.p'.format(size),
+        output_file='test_sessions_{}.p'.format(size or 'full'),
+        shared_output_file='shared_{}.p'.format(size or 'full'),
         label_encoders=shared_data['label_encoders'],
         hot_encoders=shared_data['hot_encoders'],
         nrows=size

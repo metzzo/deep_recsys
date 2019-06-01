@@ -37,7 +37,11 @@ RecSysSample = namedtuple('RecSysSample', [
 
 
 def _internal_collator(data, session_targets, item_size):
-    session_targets = torch.stack(session_targets, 0)
+    lengths = [len(cap) for cap in session_targets]
+    batched_session_targets = torch.zeros(len(data), max(lengths), session_targets[0].size(1)).float()
+    for i, cap in enumerate(session_targets):
+        end = lengths[i]
+        batched_session_targets[i, :end] = cap[:end]
 
     lengths = [len(cap) for cap in data]
     sessions = torch.zeros(len(data), max(lengths), item_size).float()
@@ -45,7 +49,7 @@ def _internal_collator(data, session_targets, item_size):
         end = lengths[i]
         sessions[i, :end] = cap[:end]
 
-    return sessions, torch.tensor(lengths), session_targets
+    return sessions, torch.tensor(lengths), batched_session_targets
 
 
 # TODO: make different collators for different data
@@ -144,17 +148,17 @@ class RecSysDataset(Dataset):
                         end_pos = randint(start_pos + 2, len(indices) - 1)
                         indices = indices[start_pos:end_pos]
 
-            if random() > 0.5:
-                # randomly flip indiced
-                indices = np.flip(indices)
+            #if random() > 0.5:
+            #    # randomly flip indiced
+            #    indices = np.flip(indices)
 
         session = self.rec_sys_data.session_df.loc[
             indices
         ]
 
-        target_properties = self.rec_sys_data.item_properties.loc[
-            indices[-1]
-        ]
+        target_properties = np.array(self.rec_sys_data.item_properties.loc[
+            indices[1:]
+        ])
 
         item_properties = np.array(self.rec_sys_data.item_properties.loc[
             indices[:-1]
@@ -203,7 +207,7 @@ class RecSysDataset(Dataset):
                 idx = np.where(item_impressions_id == last_row['reference'])[0]
                 if len(idx) == 0:
                     item_impressions_id[0] = last_row['reference']
-                    item_impressions[0] = target_properties
+                    item_impressions[0] = target_properties[-1]
                     idx = 0
                 else:
                     idx = idx[0]

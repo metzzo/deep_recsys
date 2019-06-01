@@ -27,7 +27,7 @@ class RecommenderNetwork(nn.Module):
             batch_first=True,
             num_layers=config.get('num_gru_layers'),
             dropout=0.0,
-            bidirectional=True,
+            bidirectional=False,
         )
         self.target_item_size = target_item_size
 
@@ -42,7 +42,7 @@ class RecommenderNetwork(nn.Module):
         for name, param in self.hidden2tag.named_parameters():
             nn.init.normal_(param)
 
-    def forward(self, sessions: torch.Tensor, session_lengths: torch.Tensor):
+    def forward(self, sessions: torch.Tensor, session_lengths: torch.Tensor, only_last=False):
         #print("Begin shape", sessions.shape)
         """
         a = sessions
@@ -58,10 +58,16 @@ class RecommenderNetwork(nn.Module):
 
         sessions = torch.nn.utils.rnn.pack_padded_sequence(sessions, session_lengths, batch_first=True)
 
-        _, hidden = self.gru(sessions)
-        hidden = hidden[-1].view(hidden.size(1), -1)
+        lstm_out, last = self.gru(sessions)
+        if only_last:
+            last = last.reshape(last.size(1), -1)
+            last = self.hidden2tag(last)
+            return last
+        else:
+            lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(lstm_out, batch_first=True)
+            lstm_out = lstm_out.contiguous().view(-1, lstm_out.size(2))
 
-        item_space = self.hidden2tag(hidden)
+            item_space = self.hidden2tag(lstm_out)
 
-        return item_space
+            return item_space
 
